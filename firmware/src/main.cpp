@@ -48,9 +48,11 @@ const size_t CODEX_FRAME_BYTES = (size_t)CODEX_SPRITE_W * CODEX_SPRITE_H * 2;
 // heap for AnimatedGIF's own buffers, which wouldn't fit alongside a static
 // full-frame buffer (a 120x120 frame is ~28KB) on the ESP8266's ~80KB. So both
 // the display path and the decoder work one screen-row at a time through these
-// two small scratch rows (SCREEN_W is the widest we ever need).
-uint16_t rowBuf[SCREEN_W];     // current row being drawn / decoded
-uint16_t prevRowBuf[SCREEN_W]; // decode only: same row from the previous frame
+// two small scratch rows. Sized for the widest row we ever read: the music
+// title strip is 232px wide and the stock name strips 156px, both wider than
+// the 128px panel, so a fixed 240-entry buffer is used instead of SCREEN_W.
+uint16_t rowBuf[240];     // current row being drawn / decoded
+uint16_t prevRowBuf[240]; // decode only: same row from the previous frame
 
 bool claudeCustom = false;
 int claudeCustomFrames = 0;
@@ -58,9 +60,9 @@ bool codexCustom = false;
 int codexCustomFrames = 0;
 uint32_t spriteRev = 0; // bumped on upload/reset so the Mac mirror re-fetches
 
-const int SCREEN_CX = 120, SCREEN_CY = 120;
-const int RING_MARGIN = 4;      // inset from screen edge
-const int RING_THICKNESS = 10;  // ring bar thickness
+const int SCREEN_CX = 64, SCREEN_CY = 64;
+const int RING_MARGIN = 2;      // inset from screen edge
+const int RING_THICKNESS = 6;   // ring bar thickness (thinner on the 128px panel)
 const unsigned long ANIM_INTERVAL_MS = 120;  // sprite frame advance
 const unsigned long FLASH_INTERVAL_MS = 400; // "urgent" flash speed
 const unsigned long SWITCH_BOTH_MS = 2000;   // both apps working: alternate fast
@@ -73,7 +75,7 @@ unsigned long lastSwitchMs = 0;
 // Display override, settable from the Mac app via POST /api/display:
 // auto = follow working status, claude/codex = pin that app on screen,
 // net/music = show Mac-side telemetry pages instead of the pet.
-enum DisplayMode { MODE_AUTO, MODE_CLAUDE, MODE_CODEX, MODE_NET, MODE_MUSIC, MODE_STOCK };
+enum DisplayMode { MODE_AUTO, MODE_CLAUDE, MODE_CODEX, MODE_NET, MODE_MUSIC, MODE_STOCK, MODE_MIRROR, MODE_ALBUM };
 DisplayMode displayMode = MODE_AUTO;
 
 // When AUTO and the Mac reports audio playing, the screen auto-switches to the
@@ -99,24 +101,32 @@ int netCpuPct = -1, netMemPct = -1;        // Mac CPU/MEM row; -1 = bridge sends
 String netLastCpuVal, netLastMemVal;       // change detection for the CPU/MEM values
 bool netSysLabelsDrawn = false;
 unsigned long lastNetPollMs = 0;
+unsigned long lastMirrorPollMs = 0;  // screen-mirror frame fetch cadence
+unsigned long lastAlbumPollMs = 0;   // photo-album slide cadence
 unsigned long lastNetDrawMs = 0;
 bool netChromeDrawn = false;
 bool netHeaderDirty = false;
 
 // Chart layout (task-manager style scrolling area chart, newest at the right)
-const int NET_CHART_X = 8, NET_CHART_Y = 60, NET_CHART_W = 224, NET_CHART_H = 128;
+// - sized for the 128px panel.
+const int NET_CHART_X = 4, NET_CHART_Y = 34, NET_CHART_W = 120, NET_CHART_H = 52;
 long netHistRx[NET_CHART_W], netHistTx[NET_CHART_W]; // one 250ms sample per column
 long netScale = 10240;    // current "nice" full-scale value (whole chart shares it)
 String netLastDl, netLastUl, netLastScaleText; // change detection for partial redraws
 
 // ---------- music mode state ----------
+// Bridge sends a fixed 128x128 cover and a 232x44 title strip; the 128px
+// panel shows them at half size (2x downsample below).
 const int MUSIC_COVER_W = 128;
 const int MUSIC_COVER_H = 128;
+const int MUSIC_COVER_DW = 64, MUSIC_COVER_DH = 64; // displayed size on panel
+const int MUSIC_COVER_X = (SCREEN_W - MUSIC_COVER_DW) / 2, MUSIC_COVER_Y = 4;
 // Title/artist come as a Mac-rendered bitmap strip (232x44) because the
 // panel fonts are ASCII-only and CJK titles would render as blanks.
 const int MUSIC_TEXT_W = 232;
 const int MUSIC_TEXT_H = 44;
-const int MUSIC_TEXT_X = 4, MUSIC_TEXT_Y = 150;
+const int MUSIC_TEXT_DW = 116, MUSIC_TEXT_DH = 22; // displayed size on panel
+const int MUSIC_TEXT_X = (SCREEN_W - MUSIC_TEXT_DW) / 2, MUSIC_TEXT_Y = 72;
 const unsigned long MUSIC_POLL_INTERVAL_MS = 2000;
 // ---------- stock watchlist mode state ----------
 // Rows come pre-formatted from the bridge (GET /stock or serial #STOCK):
@@ -197,11 +207,28 @@ bool webServerStarted = false; // deferred: port 80 clashes with the portal
 // firmware does the same. 0 = off, 100 = full. Persisted so it survives reboot.
 
 int brightness = BRIGHTNESS_DEFAULT; // 0-100
+bool brightnessInvert = false; // when true, PWM is inverted (for active-HIGH backlight panels wired opposite)
+int displayRotation = DISPLAY_ROTATION_DEFAULT; // 0-7
 
 void applyBrightness() {
-  // analogWriteRange(100) is set in setup(), so the duty value is just the
-  // inverted percentage (active LOW: 0 duty = always LOW = full on).
-  analogWrite(TFT_BL, 100 - brightness);
+  // TFT_BACKLIGHT_ON controls default polarity (set in platformio.ini):
+  //   HIGH = active HIGH (pin HIGH = backlight on)
+  //   LOW  = active LOW  (pin LOW  = backlight on)
+  // brightnessInvert manually toggles the formula so users whose panel is
+  // wired opposite can fix it without recompiling.
+  // analogWrite() duty: 0 = always LOW, range = always HIGH.
+#if TFT_BACKLIGHT_ON == HIGH
+  bool normal = !brightnessInvert;
+#else
+  bool normal = brightnessInvert;
+#endif
+  if (normal) {
+    // Active HIGH: higher duty = brighter
+    analogWrite(TFT_BL, brightness);
+  } else {
+    // Active LOW: lower duty = brighter (inverted)
+    analogWrite(TFT_BL, 100 - brightness);
+  }
 }
 
 void loadBrightness() {
@@ -217,6 +244,71 @@ void saveBrightness() {
   File f = LittleFS.open(BRIGHTNESS_FILE, "w");
   if (!f) return;
   f.println(brightness);
+  f.close();
+}
+
+// ---------- backlight polarity invert (for panels wired opposite) ----------
+
+void loadBrightnessInvert() {
+  if (!LittleFS.exists(BRIGHTNESS_INVERT_FILE)) return;
+  File f = LittleFS.open(BRIGHTNESS_INVERT_FILE, "r");
+  if (!f) return;
+  int v = f.readStringUntil('\n').toInt();
+  f.close();
+  brightnessInvert = (v != 0);
+}
+
+void saveBrightnessInvert() {
+  File f = LittleFS.open(BRIGHTNESS_INVERT_FILE, "w");
+  if (!f) return;
+  f.println(brightnessInvert ? 1 : 0);
+  f.close();
+}
+
+// ---------- display rotation / mirror ----------
+
+void applyDisplayRotation() {
+  // Always call setRotation() first so TFT_eSPI's internal state (_width,
+  // _height, addressing) stays consistent with the base orientation.
+  int baseRot = displayRotation & 3;
+  tft.setRotation(baseRot);
+
+  // GC9107 is a 128x160 GRAM chip but this 0.85" panel only exposes 128x128
+  // of it, at an offset inside the GRAM (Wisevision N085-1212TBWIG41-H12:
+  // colstart=2, rowstart=1). The ST7789_2_Rotation.h CGRAM_OFFSET table has
+  // been patched with a 128x128 entry, so setRotation() applies it.
+
+  // For mirrored variants (values 4-7) we override MADCTL to toggle the MX
+  // bit (column-address swap = horizontal mirror from the viewer's perspective
+  // when the display is in portrait / MV=0).  The 8 values below cover all
+  // MX/MY/MV combinations for a 128x128 square panel.
+  if (displayRotation & 4) {
+    tft.writecommand(TFT_MADCTL);
+    switch (baseRot) {
+      case 0: tft.writedata(TFT_MAD_MX | TFT_MAD_COLOR_ORDER);            break; // 0x48
+      case 1: tft.writedata(TFT_MAD_MV | TFT_MAD_COLOR_ORDER);            break; // 0x28
+      case 2: tft.writedata(TFT_MAD_MY | TFT_MAD_COLOR_ORDER);            break; // 0x88
+      case 3: tft.writedata(TFT_MAD_MX | TFT_MAD_MY | TFT_MAD_MV |
+                            TFT_MAD_COLOR_ORDER);                          break; // 0xE8
+    }
+  }
+  Serial.printf("[display] rotation=%d (base=%d, mirror=%d)\n",
+                displayRotation, baseRot, !!(displayRotation & 4));
+}
+
+void loadDisplayConfig() {
+  if (!LittleFS.exists(DISPLAY_CONFIG_FILE)) return;
+  File f = LittleFS.open(DISPLAY_CONFIG_FILE, "r");
+  if (!f) return;
+  int v = f.readStringUntil('\n').toInt();
+  f.close();
+  if (v >= 0 && v <= 7) displayRotation = v;
+}
+
+void saveDisplayConfig() {
+  File f = LittleFS.open(DISPLAY_CONFIG_FILE, "w");
+  if (!f) return;
+  f.println(displayRotation);
   f.close();
 }
 
@@ -282,22 +374,29 @@ int codexFrameCount() { return codexCustom ? codexCustomFrames : CODEX_SPRITE_FR
 // file (streamed) or the compiled-in PROGMEM default (copied row-by-row).
 void drawSpriteFrame(bool custom, const char *file, const uint16_t *const *progmemFrames, int frameIdx, int w,
                      int h, size_t frameBytes) {
-  int x0 = SCREEN_CX - w / 2, y0 = SCREEN_CY - h / 2;
+  // 128x128 panel: draw sprites at half native size (2x downsample) so the
+  // ring + quota text still fit around them.
+  const int S = 2;
+  int dw = w / S, dh = h / S;
+  int x0 = SCREEN_CX - dw / 2, y0 = SCREEN_CY - dh / 2;
   size_t rowBytes = (size_t)w * 2;
   if (custom) {
     File f = LittleFS.open(file, "r");
     if (!f) return;
     f.seek(1 + (size_t)frameIdx * frameBytes);
-    for (int r = 0; r < h; r++) {
+    for (int r = 0; r < dh; r++) {
+      f.seek(1 + (size_t)frameIdx * frameBytes + (size_t)(r * S) * rowBytes);
       f.read((uint8_t *)rowBuf, rowBytes);
-      tft.pushImage(x0, y0 + r, w, 1, rowBuf);
+      for (int c = 0; c < dw; c++) rowBuf[c] = rowBuf[c * S];
+      tft.pushImage(x0, y0 + r, dw, 1, rowBuf);
     }
     f.close();
   } else {
     const uint16_t *frame = progmemFrames[frameIdx];
-    for (int r = 0; r < h; r++) {
-      memcpy_P(rowBuf, frame + (size_t)r * w, rowBytes);
-      tft.pushImage(x0, y0 + r, w, 1, rowBuf);
+    for (int r = 0; r < dh; r++) {
+      memcpy_P(rowBuf, frame + (size_t)(r * S) * w, rowBytes);
+      for (int c = 0; c < dw; c++) rowBuf[c] = rowBuf[c * S];
+      tft.pushImage(x0, y0 + r, dw, 1, rowBuf);
     }
   }
 }
@@ -426,8 +525,8 @@ String pctText(float pct) {
 // Quota readout below the sprite: two columns ("5h" / "Wk"), small grey label
 // over a big font-4 percentage. Values repaint only when their text changes
 // (force = after a full-screen clear), so the 5s poll never flashes them.
-const int QUOTA_LABEL_Y = 183, QUOTA_VALUE_Y = 199;
-const int QUOTA_COL1_X = 70, QUOTA_COL2_X = 170;
+const int QUOTA_LABEL_Y = 96, QUOTA_VALUE_Y = 108;
+const int QUOTA_COL1_X = 32, QUOTA_COL2_X = 96;
 String lastQuota5h, lastQuotaWk;
 
 // pushImage() colors must be pre-byte-swapped (this firmware never enables
@@ -625,33 +724,33 @@ void drawQuotaText(float hourPct, float weekPct, bool force) {
   if ((int8_t)single != lastSingle) {
     lastSingle = (int8_t)single;
     force = true;
-    tft.fillRect(0, QUOTA_LABEL_Y, 240, QUOTA_VALUE_Y + 22 - QUOTA_LABEL_Y, TFT_BLACK);
+    tft.fillRect(0, QUOTA_LABEL_Y, SCREEN_W, QUOTA_VALUE_Y + 15 - QUOTA_LABEL_Y, TFT_BLACK);
   }
   if (single) {
-    if (force) drawSqTextC("Wk", 120, QUOTA_LABEL_Y, 2, 2, TFT_LIGHTGREY);
+    if (force) drawSqTextC("Wk", SCREEN_CX, QUOTA_LABEL_Y, 1, 1, TFT_LIGHTGREY);
     String v = pctText(weekPct);
     if (force || v != lastQuotaWk) {
       lastQuotaWk = v;
       lastQuota5h = "";
-      tft.fillRect(120 - 50, QUOTA_VALUE_Y, 100, 22, TFT_BLACK);
-      drawDotTextC(v, 120, QUOTA_VALUE_Y, 3, 1, TFT_WHITE);
+      tft.fillRect(SCREEN_CX - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+      drawDotTextC(v, SCREEN_CX, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
     }
     return;
   }
   if (force) {
-    drawSqTextC("5h", QUOTA_COL1_X, QUOTA_LABEL_Y, 2, 2, TFT_LIGHTGREY);
-    drawSqTextC("Wk", QUOTA_COL2_X, QUOTA_LABEL_Y, 2, 2, TFT_LIGHTGREY);
+    drawSqTextC("5h", QUOTA_COL1_X, QUOTA_LABEL_Y, 1, 1, TFT_LIGHTGREY);
+    drawSqTextC("Wk", QUOTA_COL2_X, QUOTA_LABEL_Y, 1, 1, TFT_LIGHTGREY);
   }
   String v1 = pctText(hourPct), v2 = pctText(weekPct);
   if (force || v1 != lastQuota5h) {
     lastQuota5h = v1;
-    tft.fillRect(QUOTA_COL1_X - 50, QUOTA_VALUE_Y, 100, 22, TFT_BLACK);
-    drawDotTextC(v1, QUOTA_COL1_X, QUOTA_VALUE_Y, 3, 1, TFT_WHITE);
+    tft.fillRect(QUOTA_COL1_X - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+    drawDotTextC(v1, QUOTA_COL1_X, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
   }
   if (force || v2 != lastQuotaWk) {
     lastQuotaWk = v2;
-    tft.fillRect(QUOTA_COL2_X - 50, QUOTA_VALUE_Y, 100, 22, TFT_BLACK);
-    drawDotTextC(v2, QUOTA_COL2_X, QUOTA_VALUE_Y, 3, 1, TFT_WHITE);
+    tft.fillRect(QUOTA_COL2_X - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+    drawDotTextC(v2, QUOTA_COL2_X, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
   }
 }
 
@@ -727,11 +826,11 @@ void drawCountdown(bool force) {
   // A length change ("100:00" -> "99:59:59") shifts every glyph cell, so the
   // whole region must clear; otherwise same-length digits line up 1:1.
   if (t.length() != lastCountdown.length()) force = true;
-  const int P = 6, R = 2, VAL_Y = 100; // countdown dot metrics
+  const int P = 3, R = 1, VAL_Y = 64; // countdown dot metrics (compact for 128px)
   int x = SCREEN_CX - dotTextWidth(t, P, R) / 2;
   if (force) {
-    tft.fillRect(SCREEN_CX - 99, 66, 198, 84, TFT_BLACK);
-    drawDotTextC(showingCd == CD_WEEK ? "Wk RESET IN" : "5h RESET IN", SCREEN_CX, 72, 2, 0,
+    tft.fillRect(SCREEN_CX - 48, 40, 96, 56, TFT_BLACK);
+    drawDotTextC(showingCd == CD_WEEK ? "Wk RESET IN" : "5h RESET IN", SCREEN_CX, 44, 1, 0,
                  TFT_LIGHTGREY);
     drawDotText(t, x, VAL_Y, P, R, TFT_ORANGE);
   } else {
@@ -751,26 +850,27 @@ void drawCountdown(bool force) {
 
 // App logo in the top-left corner (inside the quota ring) so a glance tells
 // which app the screen is currently showing. Drawn row-by-row from PROGMEM
-// through rowBuf, same as the sprite path. (A dotted-logo experiment got
-// reverted: at 40px the sampled dots were unrecognizable.)
-const int LOGO_X = 14, LOGO_Y = 18;
+// through rowBuf, 2x downsampled to fit the 128px panel.
+const int LOGO_X = 8, LOGO_Y = 10;
 
 void drawAppLogo() {
   const uint16_t *logo = (currentApp == APP_CLAUDE) ? claude_logo_0 : codex_logo_0;
   int w = (currentApp == APP_CLAUDE) ? CLAUDE_LOGO_W : CODEX_LOGO_W;
   int h = (currentApp == APP_CLAUDE) ? CLAUDE_LOGO_H : CODEX_LOGO_H;
-  for (int r = 0; r < h; r++) {
-    memcpy_P(rowBuf, logo + (size_t)r * w, (size_t)w * 2);
-    tft.pushImage(LOGO_X, LOGO_Y + r, w, 1, rowBuf);
+  const int S = 2;
+  int dw = w / S, dh = h / S;
+  for (int r = 0; r < dh; r++) {
+    memcpy_P(rowBuf, logo + (size_t)(r * S) * w, (size_t)w * 2);
+    for (int c = 0; c < dw; c++) rowBuf[c] = rowBuf[c * S];
+    tft.pushImage(LOGO_X, LOGO_Y + r, dw, 1, rowBuf);
   }
 }
 
 // Days until the weekly window resets, top-right corner inside the ring
 // (mirrors the app logo top-left). Weekly only - the 5h window is too short
 // for a day count to say anything. Under a day it degrades to hours.
-// The x extent (166..225) stays clear of both the ring (>=226) and the
-// sprite (x<=180 but only from y=60 down); the value must end above y=60.
-const int RESET_CX = 198, RESET_LABEL_Y = 18, RESET_VALUE_Y = 33;
+// Compact position for the 128px panel, clear of the ring edge.
+const int RESET_CX = 112, RESET_LABEL_Y = 10, RESET_VALUE_Y = 24;
 String lastResetDays;
 
 String resetDaysText(int min) {
@@ -783,11 +883,11 @@ void drawResetDays(bool force) {
   String t = resetDaysText(currentWeekResetMin());
   if (!force && t == lastResetDays) return;
   lastResetDays = t;
-  tft.fillRect(RESET_CX - 32, RESET_LABEL_Y, 60, RESET_VALUE_Y + 27 - RESET_LABEL_Y, TFT_BLACK);
+  tft.fillRect(RESET_CX - 28, RESET_LABEL_Y, 52, RESET_VALUE_Y + 19 - RESET_LABEL_Y, TFT_BLACK);
   if (t.length() == 0) return;
   drawTinyBoldText("RESET", RESET_CX, RESET_LABEL_Y, TFT_LIGHTGREY);
   // 2 chars ("3d") get big 3px dots; 3 chars ("18h") drop a size to fit.
-  int pitch = t.length() <= 2 ? 4 : 3;
+  int pitch = t.length() <= 2 ? 3 : 2;
   drawDotTextC(t, RESET_CX, RESET_VALUE_Y, pitch, 1, TFT_WHITE);
 }
 
@@ -940,24 +1040,24 @@ void drawNetChrome() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(0x7BEF, TFT_BLACK);
-  tft.drawString("DOWN", 14, 10, 1);
-  tft.drawString("UP", 134, 10, 1);
+  tft.drawString("DOWN", 8, 4, 1);
+  tft.drawString("UP", 68, 4, 1);
   tft.setTextDatum(TC_DATUM);
-  tft.drawString("MAC NET  -  56s", SCREEN_CX, 226, 1); // below the CPU/MEM row
+  tft.drawString("MAC NET  -  56s", SCREEN_CX, 120, 1); // below the CPU/MEM row
 }
 
 // Mac CPU / memory usage row between the chart and the footer: small grey
-// labels at fixed positions, big font-4 values left-aligned at fixed x so a
+// labels at fixed positions, font-2 values left-aligned at fixed x so a
 // width change (5% -> 30%) never shifts the rest of the row around.
 // Hidden only if an old bridge doesn't send the fields yet.
-const int NET_SYS_Y = 192;                          // row top (26px tall, font 4)
-const int NET_CPU_LABEL_X = 28, NET_CPU_VAL_X = 62; // value region 62..126 ("100%" = 63px)
-const int NET_MEM_LABEL_X = 130, NET_MEM_VAL_X = 164;
+const int NET_SYS_Y = 96;                           // row top (18px tall, font 2)
+const int NET_CPU_LABEL_X = 8, NET_CPU_VAL_X = 32;  // value region 32..68 ("100%" fits)
+const int NET_MEM_LABEL_X = 72, NET_MEM_VAL_X = 96;
 
 void drawNetSysinfoIfChanged() {
   if (netCpuPct < 0) {
     if (netSysLabelsDrawn) { // bridge stopped sending: erase the whole row
-      tft.fillRect(0, NET_SYS_Y, SCREEN_W, 26, TFT_BLACK);
+      tft.fillRect(0, NET_SYS_Y, SCREEN_W, 18, TFT_BLACK);
       netSysLabelsDrawn = false;
       netLastCpuVal = "";
       netLastMemVal = "";
@@ -968,20 +1068,20 @@ void drawNetSysinfoIfChanged() {
   if (!netSysLabelsDrawn) {
     netSysLabelsDrawn = true;
     tft.setTextColor(0x7BEF, TFT_BLACK);
-    tft.drawString("CPU", NET_CPU_LABEL_X, NET_SYS_Y + 6, 2);
-    tft.drawString("MEM", NET_MEM_LABEL_X, NET_SYS_Y + 6, 2);
+    tft.drawString("CPU", NET_CPU_LABEL_X, NET_SYS_Y + 4, 1);
+    tft.drawString("MEM", NET_MEM_LABEL_X, NET_SYS_Y + 4, 1);
   }
   String c = String(netCpuPct) + "%", m = String(netMemPct) + "%";
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (c != netLastCpuVal) {
     netLastCpuVal = c;
-    tft.fillRect(NET_CPU_VAL_X, NET_SYS_Y, 64, 26, TFT_BLACK);
-    tft.drawString(c, NET_CPU_VAL_X, NET_SYS_Y, 4);
+    tft.fillRect(NET_CPU_VAL_X, NET_SYS_Y, 40, 18, TFT_BLACK);
+    tft.drawString(c, NET_CPU_VAL_X, NET_SYS_Y, 2);
   }
   if (m != netLastMemVal) {
     netLastMemVal = m;
-    tft.fillRect(NET_MEM_VAL_X, NET_SYS_Y, 64, 26, TFT_BLACK);
-    tft.drawString(m, NET_MEM_VAL_X, NET_SYS_Y, 4);
+    tft.fillRect(NET_MEM_VAL_X, NET_SYS_Y, 32, 18, TFT_BLACK);
+    tft.drawString(m, NET_MEM_VAL_X, NET_SYS_Y, 2);
   }
 }
 
@@ -992,15 +1092,15 @@ void drawNetHeaderIfChanged() {
   tft.setTextDatum(TL_DATUM);
   if (dl != netLastDl) {
     netLastDl = dl;
-    tft.fillRect(12, 20, 116, 28, TFT_BLACK);
+    tft.fillRect(8, 14, 60, 18, TFT_BLACK);
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawString(dl, 12, 20, 4);
+    tft.drawString(dl, 8, 14, 2);
   }
   if (ul != netLastUl) {
     netLastUl = ul;
-    tft.fillRect(132, 20, 108, 28, TFT_BLACK);
+    tft.fillRect(68, 14, 56, 18, TFT_BLACK);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString(ul, 132, 20, 4);
+    tft.drawString(ul, 68, 14, 2);
   }
 }
 
@@ -1154,13 +1254,13 @@ String timeText(int sec) {
 }
 
 void drawMusicCoverPlaceholder() {
-  const int x = (SCREEN_W - MUSIC_COVER_W) / 2;
-  const int y = 14;
-  tft.fillRect(x, y, MUSIC_COVER_W, MUSIC_COVER_H, TFT_DARKGREY);
-  tft.drawRect(x, y, MUSIC_COVER_W, MUSIC_COVER_H, TFT_DARKGREY);
+  const int x = MUSIC_COVER_X;
+  const int y = MUSIC_COVER_Y;
+  tft.fillRect(x, y, MUSIC_COVER_DW, MUSIC_COVER_DH, TFT_DARKGREY);
+  tft.drawRect(x, y, MUSIC_COVER_DW, MUSIC_COVER_DH, TFT_DARKGREY);
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(TFT_LIGHTGREY, TFT_DARKGREY);
-  tft.drawString("No Art", SCREEN_CX, y + MUSIC_COVER_H / 2, 2);
+  tft.drawString("No Art", SCREEN_CX, y + MUSIC_COVER_DH / 2, 1);
 }
 
 bool drawMusicCoverFromBridge() {
@@ -1176,17 +1276,25 @@ bool drawMusicCoverFromBridge() {
     return false;
   }
   WiFiClient *stream = http.getStreamPtr();
-  const int x = (SCREEN_W - MUSIC_COVER_W) / 2;
-  const int y = 14;
+  const int x = MUSIC_COVER_X;
+  const int y = MUSIC_COVER_Y;
   const size_t rowBytes = (size_t)MUSIC_COVER_W * 2;
   bool ok = true;
-  for (int r = 0; r < MUSIC_COVER_H; r++) {
-    int got = stream->readBytes((uint8_t *)rowBuf, rowBytes);
-    if (got != (int)rowBytes) {
-      ok = false;
-      break;
+  // 2x downsample: read a full 128px row, keep every other pixel; display
+  // every other row so the 64x64 cover fits the 128px panel.
+  for (int r = 0; r < MUSIC_COVER_DH; r++) {
+    for (int skip = 0; skip < 2; skip++) {
+      int got = stream->readBytes((uint8_t *)rowBuf, rowBytes);
+      if (got != (int)rowBytes) {
+        ok = false;
+        break;
+      }
+      if (skip == 0) {
+        for (int c = 0; c < MUSIC_COVER_DW; c++) rowBuf[c] = rowBuf[c * 2];
+        tft.pushImage(x, y + r, MUSIC_COVER_DW, 1, rowBuf);
+      }
     }
-    tft.pushImage(x, y + r, MUSIC_COVER_W, 1, rowBuf);
+    if (!ok) break;
     yield();
   }
   http.end();
@@ -1210,13 +1318,21 @@ bool drawMusicTextFromBridge() {
   WiFiClient *stream = http.getStreamPtr();
   const size_t rowBytes = (size_t)MUSIC_TEXT_W * 2;
   bool ok = true;
-  for (int r = 0; r < MUSIC_TEXT_H; r++) {
-    int got = stream->readBytes((uint8_t *)rowBuf, rowBytes);
-    if (got != (int)rowBytes) {
-      ok = false;
-      break;
+  // 2x downsample: read a full 232px row, keep every other pixel; display
+  // every other row so the 116x22 strip fits the 128px panel.
+  for (int r = 0; r < MUSIC_TEXT_DH; r++) {
+    for (int skip = 0; skip < 2; skip++) {
+      int got = stream->readBytes((uint8_t *)rowBuf, rowBytes);
+      if (got != (int)rowBytes) {
+        ok = false;
+        break;
+      }
+      if (skip == 0) {
+        for (int c = 0; c < MUSIC_TEXT_DW; c++) rowBuf[c] = rowBuf[c * 2];
+        tft.pushImage(MUSIC_TEXT_X, MUSIC_TEXT_Y + r, MUSIC_TEXT_DW, 1, rowBuf);
+      }
     }
-    tft.pushImage(MUSIC_TEXT_X, MUSIC_TEXT_Y + r, MUSIC_TEXT_W, 1, rowBuf);
+    if (!ok) break;
     yield();
   }
   http.end();
@@ -1234,13 +1350,13 @@ String fitText(String s, int maxPx, int font) {
 }
 
 void drawMusicTextFallback() {
-  tft.fillRect(MUSIC_TEXT_X, MUSIC_TEXT_Y, MUSIC_TEXT_W, MUSIC_TEXT_H, TFT_BLACK);
+  tft.fillRect(MUSIC_TEXT_X, MUSIC_TEXT_Y, MUSIC_TEXT_DW, MUSIC_TEXT_DH, TFT_BLACK);
   tft.setTextDatum(TC_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   String title = musicTitle.length() ? musicTitle : "No Music";
-  tft.drawString(fitText(title, 216, 2), SCREEN_CX, MUSIC_TEXT_Y + 4, 2);
+  tft.drawString(fitText(title, 110, 2), SCREEN_CX, MUSIC_TEXT_Y + 2, 2);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString(fitText(musicArtist, 216, 2), SCREEN_CX, MUSIC_TEXT_Y + 24, 2);
+  tft.drawString(fitText(musicArtist, 110, 2), SCREEN_CX, MUSIC_TEXT_Y + 13, 1);
 }
 
 // Regions repaint independently: cover / text strip only when their rev
@@ -1260,7 +1376,7 @@ void drawMusicScreen(bool coverChanged, bool textChanged) {
     if (!drawMusicTextFromBridge()) drawMusicTextFallback();
   }
 
-  const int bx = 20, by = 204, bw = 200, bh = 8;
+  const int bx = 14, by = 100, bw = 100, bh = 6;
   tft.fillRect(0, by - 2, SCREEN_W, SCREEN_H - by + 2, TFT_BLACK);
   tft.fillRect(bx, by, bw, bh, TFT_DARKGREY);
   float progress = musicDuration > 0 ? (float)musicElapsed / (float)musicDuration : 0;
@@ -1270,7 +1386,7 @@ void drawMusicScreen(bool coverChanged, bool textChanged) {
   tft.fillRect(bx, by, (int)(bw * progress), bh, color);
   tft.setTextDatum(TC_DATUM);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString(timeText(musicElapsed) + " / " + timeText(musicDuration), SCREEN_CX, 220, 1);
+  tft.drawString(timeText(musicElapsed) + " / " + timeText(musicDuration), SCREEN_CX, 116, 1);
 }
 
 void pollMusic() {
@@ -1299,6 +1415,72 @@ void pollMusic() {
       bool textChanged = tRev != musicTextRev;
       musicTextRev = tRev;
       drawMusicScreen(coverChanged, textChanged);
+    }
+  }
+  http.end();
+}
+
+// ---------- screen mirror ----------
+// The bridge scales the Mac/PC desktop (or a chosen window) down to the
+// panel size and serves each frame as raw RGB565 via GET /mirror/raw. We
+// fetch one frame per interval and stream it row-by-row straight to the
+// panel (rowBuf scratch row, no full-frame buffer), byte order matching the
+// pushImage() pipeline used by the sprite/cover code.
+const unsigned long MIRROR_POLL_INTERVAL_MS = 500; // ~2 fps over LAN
+const unsigned long MIRROR_HTTP_TIMEOUT_MS = 1500;
+
+void pollMirror() {
+  if (WiFi.status() != WL_CONNECTED || bridgeHost.length() == 0) return;
+  WiFiClient client;
+  HTTPClient http;
+  String url = "http://" + bridgeHost + "/mirror/raw";
+  http.setTimeout(MIRROR_HTTP_TIMEOUT_MS);
+  if (!http.begin(client, url)) return;
+  int code = http.GET();
+  if (code == HTTP_CODE_OK) {
+    WiFiClient *stream = http.getStreamPtr();
+    const size_t rowBytes = (size_t)SCREEN_W * 2;
+    bool ok = true;
+    for (int r = 0; r < SCREEN_H && ok; r++) {
+      if (stream->readBytes((uint8_t *)rowBuf, rowBytes) != (int)rowBytes) {
+        ok = false;
+        break;
+      }
+      tft.pushImage(0, r, SCREEN_W, 1, rowBuf);
+      yield();
+    }
+  }
+  http.end();
+}
+
+// ---------- photo album ----------
+// The bridge serves a photo list via GET /album/list (JSON {"count":N}) and
+// the current resized 128x128 RGB565 photo via GET /album/raw. The bridge
+// advances to the next photo on each /album/raw request, so we just poll it
+// once per ALBUM_POLL_INTERVAL_MS and stream the frame row-by-row exactly
+// like the mirror path (no idx needed on the wire).
+const unsigned long ALBUM_POLL_INTERVAL_MS = 4000; // one slide per ~4s
+const unsigned long ALBUM_HTTP_TIMEOUT_MS = 2000;
+
+void pollAlbum() {
+  if (WiFi.status() != WL_CONNECTED || bridgeHost.length() == 0) return;
+  WiFiClient client;
+  HTTPClient http;
+  String url = "http://" + bridgeHost + "/album/raw";
+  http.setTimeout(ALBUM_HTTP_TIMEOUT_MS);
+  if (!http.begin(client, url)) return;
+  int code = http.GET();
+  if (code == HTTP_CODE_OK) {
+    WiFiClient *stream = http.getStreamPtr();
+    const size_t rowBytes = (size_t)SCREEN_W * 2;
+    bool ok = true;
+    for (int r = 0; r < SCREEN_H && ok; r++) {
+      if (stream->readBytes((uint8_t *)rowBuf, rowBytes) != (int)rowBytes) {
+        ok = false;
+        break;
+      }
+      tft.pushImage(0, r, SCREEN_W, 1, rowBuf);
+      yield();
     }
   }
   http.end();
@@ -1347,14 +1529,21 @@ bool drawStockNames() {
   }
   const size_t rowBytes = (size_t)STOCK_NAME_W * 2;
   bool ok = true;
+  // 2x downsample for the 128px panel: read a full 156px strip row, keep
+  // every other pixel (78px wide); display every other row (8px tall).
   for (int i = 0; i < cnt && ok; i++) {
-    int y0 = 10 + i * 54;
-    for (int r = 0; r < STOCK_NAME_H; r++) {
-      if (stream->readBytes((uint8_t *)rowBuf, rowBytes) != (int)rowBytes) {
-        ok = false;
-        break;
+    int y0 = 4 + i * 26;
+    for (int r = 0; r < STOCK_NAME_H / 2; r++) {
+      for (int skip = 0; skip < 2; skip++) {
+        if (stream->readBytes((uint8_t *)rowBuf, rowBytes) != (int)rowBytes) {
+          ok = false;
+          break;
+        }
+        if (skip == 0) {
+          for (int c = 0; c < STOCK_NAME_W / 2; c++) rowBuf[c] = rowBuf[c * 2];
+          if (i < stockCount) tft.pushImage(48, y0 + r, STOCK_NAME_W / 2, 1, rowBuf);
+        }
       }
-      if (i < stockCount) tft.pushImage(70, y0 + r, STOCK_NAME_W, 1, rowBuf);
       yield();
     }
   }
@@ -1374,9 +1563,9 @@ void pollStock() {
   http.end();
 }
 
-// 54px per row: small grey code on top, big font-4 price (white) on the left
-// and change% on the right - red rising / green falling (CN convention).
-// Rows repaint only when their text changes, same trick as everywhere else.
+// 26px per row (compact for 128px panel): small grey code on top, font-2
+// price (white) on the left and change% on the right - red rising / green
+// falling (CN convention). Rows repaint only when their text changes.
 void drawStockScreen() {
   if (!stockChromeDrawn) {
     tft.fillScreen(TFT_BLACK);
@@ -1388,7 +1577,7 @@ void drawStockScreen() {
     stockNamesDrawnRev = -1;
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(0x7BEF, TFT_BLACK);
-    tft.drawString("STOCKS", SCREEN_CX, 228, 1);
+    tft.drawString("STOCKS", SCREEN_CX, 118, 1);
   }
   stockDirty = false;
 
@@ -1398,43 +1587,43 @@ void drawStockScreen() {
         stockLastCode[i] = "";
         stockLastVal[i] = "";
       }
-      tft.fillRect(0, 0, SCREEN_W, 226, TFT_BLACK);
+      tft.fillRect(0, 0, SCREEN_W, 116, TFT_BLACK);
       tft.setTextDatum(TC_DATUM);
       tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      tft.drawString(stockEverLoaded ? "No stocks configured" : "Waiting for bridge...", SCREEN_CX, 100, 2);
-      if (stockEverLoaded) tft.drawString("Mac menu: Set watchlist", SCREEN_CX, 124, 2);
+      tft.drawString(stockEverLoaded ? "No stocks configured" : "Waiting for bridge...", SCREEN_CX, 56, 2);
+      if (stockEverLoaded) tft.drawString("Mac menu: Set watchlist", SCREEN_CX, 74, 1);
     }
     return;
   }
 
   for (int i = 0; i < MAX_STOCKS; i++) {
-    int y0 = 10 + i * 54;
+    int y0 = 4 + i * 26;
     bool has = i < stockCount;
     // top line (code + name strip) and value line refresh independently, so
     // a price tick never wipes the name bitmap
     String codeKey = has ? stocks[i].code : "";
     if (codeKey != stockLastCode[i]) {
       stockLastCode[i] = codeKey;
-      tft.fillRect(0, y0, SCREEN_W, 17, TFT_BLACK);
+      tft.fillRect(0, y0, SCREEN_W, 12, TFT_BLACK);
       stockNamesDrawnRev = -1; // strip area wiped: re-fetch names
       if (has) {
         tft.setTextDatum(TL_DATUM);
         tft.setTextColor(0x7BEF, TFT_BLACK);
-        tft.drawString(stocks[i].code, 14, y0, 2);
+        tft.drawString(stocks[i].code, 6, y0, 1);
       }
     }
     String valKey = has ? stocks[i].price + "|" + stocks[i].pct + "|" + String(stocks[i].up) : "";
     if (valKey != stockLastVal[i]) {
       stockLastVal[i] = valKey;
-      tft.fillRect(0, y0 + 18, SCREEN_W, 36, TFT_BLACK); // value line + inter-row gap
+      tft.fillRect(0, y0 + 12, SCREEN_W, 14, TFT_BLACK); // value line + inter-row gap
       if (has) {
         tft.setTextDatum(TL_DATUM);
         tft.setTextColor(TFT_WHITE, TFT_BLACK);
-        tft.drawString(stocks[i].price, 14, y0 + 18, 4);
+        tft.drawString(stocks[i].price, 6, y0 + 12, 2);
         uint16_t pc = stocks[i].up > 0 ? TFT_RED : (stocks[i].up < 0 ? TFT_GREEN : TFT_LIGHTGREY);
         tft.setTextDatum(TR_DATUM);
         tft.setTextColor(pc, TFT_BLACK);
-        tft.drawString(stocks[i].pct, 226, y0 + 18, 4);
+        tft.drawString(stocks[i].pct, 124, y0 + 12, 2);
       }
     }
   }
@@ -1453,17 +1642,17 @@ void configModeCallback(WiFiManager *wm) {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("WiFi setup needed", 8, 32, 2);
-  tft.drawString("Connect phone to AP:", 8, 62, 2);
+  tft.drawString("WiFi setup needed", 8, 8, 2);
+  tft.drawString("Connect phone to AP:", 8, 28, 2);
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-  tft.drawString(WIFI_PORTAL_AP_NAME, 8, 87, 2);
+  tft.drawString(WIFI_PORTAL_AP_NAME, 8, 46, 2);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("then open 192.168.4.1", 8, 117, 2);
+  tft.drawString("then open 192.168.4.1", 8, 66, 1);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.drawString("Or: plug into the computer", 8, 155, 2);
-  tft.drawString("via USB - no WiFi needed", 8, 178, 2);
+  tft.drawString("Or: plug into the computer", 8, 84, 1);
+  tft.drawString("via USB - no WiFi needed", 8, 96, 1);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("Firmware v" FW_VERSION, 8, 215, 2);
+  tft.drawString("Firmware v" FW_VERSION, 8, 116, 1);
 }
 
 // Non-blocking: with saved credentials this still waits ~10s for the join,
@@ -1477,7 +1666,7 @@ void setupWiFi() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString("Connecting WiFi...", 8, 100, 2);
+  tft.drawString("Connecting WiFi...", 8, 56, 2);
 
   Serial.println("[wifi] starting WiFiManager autoConnect (non-blocking portal)...");
   bool ok = wifiManager.autoConnect(WIFI_PORTAL_AP_NAME);
@@ -1565,7 +1754,8 @@ void pollBridge() {
   }
   http.end();
   DisplayMode eff = effectiveMode();
-  if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK) {
+  if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK &&
+      eff != MODE_MIRROR && eff != MODE_ALBUM) {
     // Only a real app switch clears the screen; a plain data refresh paints
     // in place so the poll doesn't flash the whole display.
     if (updateActiveApp()) drawActiveApp();
@@ -1610,7 +1800,8 @@ void handleSerialFrame(char *line) {
       everPolled = true;
       showMainUiIfNeeded();
       DisplayMode eff = effectiveMode();
-      if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK) {
+      if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK &&
+          eff != MODE_MIRROR && eff != MODE_ALBUM) {
         if (updateActiveApp()) drawActiveApp();
         else refreshActiveApp();
       }
@@ -1711,6 +1902,32 @@ void handleRoot() {
   html += "<div style='font-size:13px;color:#555'>当前：<span id='briv'>" + String(brightness) +
           "%</span>（0 = 熄屏，设置立即生效并记住）</div>";
 
+  // Backlight polarity invert toggle.
+  html += "<div style='margin-top:8px'>";
+  html += "<label style='display:inline;font-weight:400'>";
+  html += "<input type='checkbox' id='blInv' " +
+          String(brightnessInvert ? "checked" : "") +
+          " onchange=\"fetch('/api/brightness-invert',{method:'POST',"
+          "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+          "body:'invert='+(this.checked?1:0)}).then(r=>{if(!r.ok)location.reload()})\"> "
+          "背光反向（适用于背光高低电平相反的屏幕）</label></div>";
+
+  // Display rotation / mirror — applies live, persisted.
+  html += "<h2 style='font-size:16px;margin-top:28px'>屏幕方向 & 镜像</h2>";
+  html += "<select id='rotSel' onchange=\"fetch('/api/rotation',{method:'POST',"
+          "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+          "body:'rot='+this.value}).then(r=>{if(!r.ok)location.reload()})\">";
+  const char *rotLabels[8] = {
+    "0° 正常", "90° 顺时针", "180° 倒置", "270° 逆时针",
+    "0° 水平镜像", "90° 水平镜像", "180° 水平镜像", "270° 水平镜像"
+  };
+  for (int i = 0; i < 8; i++) {
+    html += "<option value='" + String(i) + "'" +
+            (i == displayRotation ? " selected" : "") + ">" +
+            rotLabels[i] + "</option>";
+  }
+  html += "</select><div style='font-size:13px;color:#555'>选择后立即生效并记住</div>";
+
   // On-device GIF upload: replaces a character's animation without reflashing.
   html += "<h2 style='font-size:16px;margin-top:28px'>桌宠动画（上传 GIF）</h2>";
   html += "<p style='font-size:13px;color:#555'>上传一个 .gif，设备会在板上解码并缩放到对应角色的尺寸，"
@@ -1765,6 +1982,8 @@ const char *displayModeName(DisplayMode m) {
   if (m == MODE_NET) return "net";
   if (m == MODE_MUSIC) return "music";
   if (m == MODE_STOCK) return "stock";
+  if (m == MODE_MIRROR) return "mirror";
+  if (m == MODE_ALBUM) return "album";
   return "auto";
 }
 
@@ -1780,6 +1999,8 @@ void handleApiInfo() {
   doc["last_update_s"] = everPolled ? (long)((millis() - lastSuccessMs) / 1000) : -1;
   doc["sprite_rev"] = spriteRev;
   doc["brightness"] = brightness;
+  doc["brightness_invert"] = brightnessInvert;
+  doc["rotation"] = displayRotation;
   doc["wired"] = wiredActive(); // true = data currently arrives over USB serial
   doc["fw"] = FW_VERSION;
   JsonObject c = doc["claude"].to<JsonObject>();
@@ -1805,8 +2026,10 @@ void handleApiDisplay() {
   else if (mode == "net") displayMode = MODE_NET;
   else if (mode == "music") displayMode = MODE_MUSIC;
   else if (mode == "stock") displayMode = MODE_STOCK;
+  else if (mode == "mirror") displayMode = MODE_MIRROR;
+  else if (mode == "album") displayMode = MODE_ALBUM;
   else {
-    webServer.send(400, "text/plain", "mode must be auto|claude|codex|net|music|stock");
+    webServer.send(400, "text/plain", "mode must be auto|claude|codex|net|music|stock|mirror|album");
     return;
   }
   Serial.printf("[api] display mode = %s\n", mode.c_str());
@@ -1819,6 +2042,9 @@ void handleApiDisplay() {
   } else if (displayMode == MODE_STOCK) {
     stockChromeDrawn = false;
     lastStockPollMs = 0; // poll + draw on the next loop tick
+  } else if (displayMode == MODE_MIRROR || displayMode == MODE_ALBUM) {
+    lastMirrorPollMs = 0; // fetch a frame on the next loop tick
+    lastAlbumPollMs = 0;
   } else {
     updateActiveApp();
     drawActiveApp(); // unconditional: also repaints over a previous net chart
@@ -1839,6 +2065,47 @@ void handleApiBrightness() {
   applyBrightness();
   saveBrightness();
   Serial.printf("[api] brightness = %d\n", brightness);
+  webServer.send(200, "text/plain", "ok");
+}
+
+void handleApiBrightnessInvert() {
+  String invArg = webServer.arg("invert");
+  if (invArg.length() == 0) {
+    webServer.send(400, "text/plain", "missing invert (0/1)");
+    return;
+  }
+  brightnessInvert = (invArg.toInt() != 0);
+  applyBrightness();
+  saveBrightnessInvert();
+  Serial.printf("[api] brightness_invert = %d\n", brightnessInvert);
+  webServer.send(200, "text/plain", "ok");
+}
+
+void handleApiRotation() {
+  String rotArg = webServer.arg("rot");
+  if (rotArg.length() == 0) {
+    webServer.send(400, "text/plain", "missing rot (0-7)");
+    return;
+  }
+  int r = rotArg.toInt();
+  if (r < 0 || r > 7) {
+    webServer.send(400, "text/plain", "rot must be 0-7");
+    return;
+  }
+  displayRotation = r;
+  applyDisplayRotation();
+  // Clear the physical GRAM (MADCTL changed how pixel data maps) then
+  // draw the pet UI immediately so the user sees something.  Non-pet modes
+  // (NET/MUSIC/STOCK) will take over on the next bridge/serial data poll.
+  tft.fillScreen(TFT_BLACK);
+  netChromeDrawn = false;
+  musicChromeDrawn = false;
+  stockChromeDrawn = false;
+  stockNamesDrawnRev = -1;
+  mainUiShown = false;
+  showMainUiIfNeeded();
+  saveDisplayConfig();
+  Serial.printf("[api] rotation = %d\n", displayRotation);
   webServer.send(200, "text/plain", "ok");
 }
 
@@ -2139,6 +2406,8 @@ void setupWebServer() {
   webServer.on("/api/display", HTTP_POST, handleApiDisplay);
   webServer.on("/api/bridge", HTTP_POST, handleApiBridge);
   webServer.on("/api/brightness", HTTP_POST, handleApiBrightness);
+  webServer.on("/api/rotation", HTTP_POST, handleApiRotation);
+  webServer.on("/api/brightness-invert", HTTP_POST, handleApiBrightnessInvert);
   webServer.on("/sprite/claude/reset", HTTP_POST, []() { handleSpriteReset(APP_CLAUDE); });
   webServer.on("/sprite/codex/reset", HTTP_POST, []() { handleSpriteReset(APP_CODEX); });
   webServer.on("/sprite/claude/raw", HTTP_GET, []() { handleSpriteRaw(APP_CLAUDE); });
@@ -2161,10 +2430,12 @@ void setup() {
   LittleFS.begin();
   loadBridgeHost();
   loadBrightness();
+  loadBrightnessInvert();
   loadCustomSpriteState();
 
   tft.init();
-  tft.setRotation(0);
+  loadDisplayConfig();
+  applyDisplayRotation();
   tft.fillScreen(TFT_BLACK);
   analogWriteFreq(BRIGHTNESS_PWM_FREQ);
   analogWriteRange(100); // duty maps 1:1 to a 0-100 percentage
@@ -2179,10 +2450,10 @@ void setup() {
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString("WiFi connected", 8, 70, 2);
-    tft.drawString("Admin page:", 8, 100, 2);
+    tft.drawString("WiFi connected", 8, 16, 2);
+    tft.drawString("Admin page:", 8, 36, 2);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString("http://" + WiFi.localIP().toString(), 8, 125, 2);
+    tft.drawString("http://" + WiFi.localIP().toString(), 8, 56, 1);
     delay(3000);
 
     showMainUiIfNeeded();
@@ -2224,6 +2495,10 @@ void loop() {
     } else if (eff == MODE_STOCK) {
       stockChromeDrawn = false;
       lastStockPollMs = 0;
+    } else if (eff == MODE_MIRROR || eff == MODE_ALBUM) {
+      tft.fillScreen(TFT_BLACK); // first frame arrives on the next poll
+      lastMirrorPollMs = 0;
+      lastAlbumPollMs = 0;
     } else {
       updateActiveApp();
       drawActiveApp();
@@ -2254,6 +2529,17 @@ void loop() {
       if (!wiredActive()) pollStock();
     }
     if (!stockChromeDrawn || stockDirty) drawStockScreen();
+  } else if (eff == MODE_MIRROR) {
+    // desktop mirror: fetch the latest scaled RGB565 frame from the bridge
+    if (nowMs - lastMirrorPollMs >= MIRROR_POLL_INTERVAL_MS) {
+      lastMirrorPollMs = nowMs;
+      pollMirror();
+    }
+  } else if (eff == MODE_ALBUM) {
+    if (nowMs - lastAlbumPollMs >= ALBUM_POLL_INTERVAL_MS) {
+      lastAlbumPollMs = nowMs;
+      pollAlbum();
+    }
   } else {
     // sprite walk-cycle animation (only advances while that app is showing)
     if (nowMs - lastAnimMs >= ANIM_INTERVAL_MS) {

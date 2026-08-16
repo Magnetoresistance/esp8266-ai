@@ -33,6 +33,8 @@ static class Program
         service.MusicPlayingProvider = () => nowPlaying.Snapshot.Playing;
         var stockMonitor = new StockMonitor();
         stockMonitor.Start();
+        var mirror = new ScreenMirrorService();
+        var album = new AlbumService();
 
         var server = new MiniHttpServer(Port,
             routes: new()
@@ -42,12 +44,17 @@ static class Program
                 ["/net"] = () => netMonitor.ToJson(SystemStatsMonitor.Snapshot()),
                 ["/music"] = () => nowPlaying.ToJson(),
                 ["/stock"] = () => stockMonitor.ToJson(),
+                ["/album/list"] = () => album.ListJson(),
+                ["/album/config"] = () => album.ConfigJson(),
+                ["/mirror/config"] = () => mirror.ConfigJson(),
             },
             binaryRoutes: new()
             {
                 ["/music/cover.raw"] = () => nowPlaying.CoverRgb565,
                 ["/music/text.raw"] = () => nowPlaying.TextRgb565,
                 ["/stock/names.raw"] = () => stockMonitor.NamesRgb565,
+                ["/mirror/raw"] = () => mirror.FrameRgb565,
+                ["/album/raw"] = () => album.NextRgb565(),
             },
             postRoutes: new()
             {
@@ -78,6 +85,52 @@ static class Program
                     }
                     return Encoding.UTF8.GetBytes("{\"ok\":false}");
                 },
+                // Album: apply config JSON, or manual stepping (empty body).
+                ["/album/config"] = body =>
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        album.ApplyConfig(doc.RootElement);
+                        return album.ConfigJson();
+                    }
+                    catch
+                    {
+                        return Encoding.UTF8.GetBytes("{\"ok\":false}");
+                    }
+                },
+                ["/album/prev"] = _ =>
+                {
+                    album.ManualMode = true;
+                    album.PrevRgb565();
+                    return Encoding.UTF8.GetBytes("{\"ok\":true}");
+                },
+                ["/album/next"] = _ =>
+                {
+                    album.ManualMode = true;
+                    album.NextManualRgb565();
+                    return Encoding.UTF8.GetBytes("{\"ok\":true}");
+                },
+                ["/album/random"] = _ =>
+                {
+                    album.ManualMode = true;
+                    album.RandomRgb565();
+                    return Encoding.UTF8.GetBytes("{\"ok\":true}");
+                },
+                // Mirror: apply capture config JSON.
+                ["/mirror/config"] = body =>
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        mirror.ApplyConfig(doc.RootElement);
+                        return mirror.ConfigJson();
+                    }
+                    catch
+                    {
+                        return Encoding.UTF8.GetBytes("{\"ok\":false}");
+                    }
+                },
             });
         // Passive discovery: the clock polls us, so its source IP identifies it.
         // Remember it (for auto-pairing / DHCP-change self-healing) and adopt it
@@ -107,7 +160,7 @@ static class Program
             Console.Error.WriteLine($"[bridge] failed to bind port {Port}: {e.Message}");
         }
 
-        var context = new TrayAppContext(service, usage, netMonitor, nowPlaying, stockMonitor, Port);
+        var context = new TrayAppContext(service, usage, netMonitor, nowPlaying, stockMonitor, mirror, album, Port);
         usage.StartAutoRefresh();
         Application.Run(context);
     }

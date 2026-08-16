@@ -51,6 +51,13 @@ sealed class MirrorControl : Control
     public bool MusicPlaying;
     public Bitmap MusicCover;
 
+    // desktop-mirror / photo-album scene: a full-panel frame from the bridge
+    // (ScreenMirrorService / AlbumService), shown scaled onto the 240x240
+    // replica. Set to null to blank the scene.
+    public bool MirrorMode;
+    public bool AlbumMode;
+    public Bitmap SceneFrame;
+
     static readonly Image ClaudeLogo = LoadAsset("claude-logo.png");
     static readonly Image CodexLogo = LoadAsset("codex-logo.png");
 
@@ -115,6 +122,11 @@ sealed class MirrorControl : Control
         if (MusicMode)
         {
             DrawMusicScene(g);
+            return;
+        }
+        if (MirrorMode || AlbumMode)
+        {
+            DrawSceneFrame(g);
             return;
         }
         if (StockMode)
@@ -365,6 +377,24 @@ sealed class MirrorControl : Control
         return $"{bps:F0}B";
     }
 
+    // Desktop-mirror / photo-album scene: the bridge's full-panel RGB565
+    // frame (ScreenMirrorService / AlbumService) as a 240x240 replica.
+    void DrawSceneFrame(Graphics g)
+    {
+        if (SceneFrame == null)
+        {
+            using var greyBrush = new SolidBrush(Color.FromArgb(80, 80, 80));
+            using var hintFont = new Font("Microsoft YaHei UI", 9f);
+            using var center = new StringFormat { Alignment = StringAlignment.Center };
+            g.DrawString(MirrorMode ? "等待投屏画面…" : "相册为空\n在 exe 旁建 album 文件夹\n放入图片后重启", 
+                         hintFont, greyBrush, new RectangleF(0, 100, 240, 40), center);
+            return;
+        }
+        // frame is 128x128 panel pixels; upscale to the 240x240 replica
+        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+        g.DrawImage(SceneFrame, 0, 0, 240, 240);
+    }
+
     static GraphicsPath RoundedRect(RectangleF r, float radius)
     {
         var path = new GraphicsPath();
@@ -386,10 +416,12 @@ sealed class MirrorForm : Form
     readonly NetSpeedMonitor _netMonitor;
     readonly NowPlayingMonitor _nowPlaying;
     readonly StockMonitor _stockMonitor;
+    readonly ScreenMirrorService _mirrorService;
+    readonly AlbumService _albumService;
     readonly MirrorControl _mirror = new();
     readonly RadioButton[] _modeButtons;
-    static readonly string[] Modes = { "auto", "claude", "codex", "net", "music", "stock" };
-    static readonly string[] ModeLabels = { "自动", "Claude", "Codex", "网速", "音乐", "股票" };
+    static readonly string[] Modes = { "auto", "claude", "codex", "net", "music", "stock", "mirror", "album" };
+    static readonly string[] ModeLabels = { "自动", "Claude", "Codex", "网速", "音乐", "股票", "投屏", "相册" };
     readonly Label _statusLabel = new();
     readonly TrackBar _brightness = new() { Minimum = 0, Maximum = 100, TickStyle = TickStyle.None };
     readonly Label _brightnessValue = new();
@@ -411,12 +443,14 @@ sealed class MirrorForm : Form
     bool _applyingMode; // suppress CheckedChanged while reflecting device state
 
     public MirrorForm(StatusService service, NetSpeedMonitor netMonitor, NowPlayingMonitor nowPlaying,
-                      StockMonitor stockMonitor)
+                      StockMonitor stockMonitor, ScreenMirrorService mirrorService, AlbumService albumService)
     {
         _service = service;
         _netMonitor = netMonitor;
         _nowPlaying = nowPlaying;
         _stockMonitor = stockMonitor;
+        _mirrorService = mirrorService;
+        _albumService = albumService;
 
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -425,15 +459,18 @@ sealed class MirrorForm : Form
         BackColor = SystemColors.Control;
         Padding = new Padding(1);
 
-        ClientSize = new Size(Px(316), Px(424));
+        ClientSize = new Size(Px(316), Px(490));
 
         _mirror.SetBounds(Px(14), Px(14), Px(288), Px(288));
         Controls.Add(_mirror);
 
+        // 8 mode buttons in two rows of four so each label fits.
         _modeButtons = new RadioButton[Modes.Length];
-        var segWidth = Px(288) / Modes.Length;
+        int cols = 4;
+        var btnW = Px(288) / cols;
         for (int i = 0; i < Modes.Length; i++)
         {
+            int row = i / cols, col = i % cols;
             var btn = new RadioButton
             {
                 Appearance = Appearance.Button,
@@ -441,8 +478,9 @@ sealed class MirrorForm : Form
                 TextAlign = ContentAlignment.MiddleCenter,
                 Tag = Modes[i],
                 AutoSize = false,
+                Margin = new Padding(1),
             };
-            btn.SetBounds(Px(14) + i * segWidth, Px(312), segWidth, Px(28));
+            btn.SetBounds(Px(14) + col * btnW, Px(312) + row * Px(30), btnW - Px(2), Px(26));
             btn.CheckedChanged += ModeChanged;
             _modeButtons[i] = btn;
             Controls.Add(btn);
@@ -454,20 +492,20 @@ sealed class MirrorForm : Form
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = SystemColors.GrayText,
         };
-        sunLabel.SetBounds(Px(12), Px(346), Px(24), Px(26));
+        sunLabel.SetBounds(Px(12), Px(376), Px(24), Px(24));
         Controls.Add(sunLabel);
-        _brightness.SetBounds(Px(36), Px(346), Px(216), Px(26));
+        _brightness.SetBounds(Px(36), Px(376), Px(216), Px(24));
         _brightness.Scroll += (_, _) => OnBrightnessInput(final: false);
         _brightness.MouseUp += (_, _) => OnBrightnessInput(final: true);
         Controls.Add(_brightness);
-        _brightnessValue.SetBounds(Px(254), Px(346), Px(48), Px(26));
+        _brightnessValue.SetBounds(Px(254), Px(376), Px(48), Px(24));
         _brightnessValue.TextAlign = ContentAlignment.MiddleRight;
         _brightnessValue.ForeColor = SystemColors.GrayText;
         _brightnessValue.Font = new Font("Microsoft YaHei UI", 8.5f);
         _brightnessValue.Text = "100%";
         Controls.Add(_brightnessValue);
 
-        _statusLabel.SetBounds(Px(10), Px(378), Px(296), Px(36));
+        _statusLabel.SetBounds(Px(10), Px(416), Px(296), Px(64));
         _statusLabel.TextAlign = ContentAlignment.MiddleCenter;
         _statusLabel.ForeColor = SystemColors.GrayText;
         _statusLabel.Font = new Font("Microsoft YaHei UI", 8.5f);
@@ -558,6 +596,17 @@ sealed class MirrorForm : Form
         _brightnessValue.Text = $"{level}%";
     }
 
+    /// Manual album stepping (tray menu): repaint the replica with the
+    /// album's current photo right away, without waiting for the next Tick.
+    public void RefreshAlbumNow()
+    {
+        if (!_mirror.AlbumMode || _albumService == null) return;
+        var frame = _albumService.NextRgb565();
+        _mirror.SceneFrame?.Dispose();
+        _mirror.SceneFrame = frame.Length > 0 ? Rgb565.Decode(frame, 0, 128, 128) : null;
+        _mirror.Invalidate();
+    }
+
     /// One sweep step: push the newest 4Hz sample, refresh the DL/UL readout.
     void SweepTick()
     {
@@ -613,6 +662,27 @@ sealed class MirrorForm : Form
         _mirror.NetMode = info.Effective == "net";
         _mirror.MusicMode = info.Effective == "music";
         _mirror.StockMode = info.Effective == "stock";
+        _mirror.MirrorMode = info.Effective == "mirror";
+        _mirror.AlbumMode = info.Effective == "album";
+        if (_mirror.MirrorMode)
+        {
+            // show the same full-panel frame the device just drew
+            var frame = _mirrorService.FrameRgb565;
+            _mirror.SceneFrame?.Dispose();
+            _mirror.SceneFrame = frame.Length > 0 ? Rgb565.Decode(frame, 0, 128, 128) : null;
+            _mirror.Invalidate();
+            return;
+        }
+        if (_mirror.AlbumMode)
+        {
+            var frame = _albumService.NextRgb565();
+            _mirror.SceneFrame?.Dispose();
+            _mirror.SceneFrame = frame.Length > 0 ? Rgb565.Decode(frame, 0, 128, 128) : null;
+            _mirror.Invalidate();
+            return;
+        }
+        _mirror.SceneFrame?.Dispose();
+        _mirror.SceneFrame = null;
         if (_mirror.StockMode)
         {
             _mirror.StockRows = _stockMonitor.Snapshot;

@@ -14,6 +14,8 @@ sealed class TrayAppContext : ApplicationContext
     readonly UsageFetcher _usage;
     readonly int _port;
     readonly MirrorForm _mirror;
+    readonly ScreenMirrorService _mirrorService;
+    readonly AlbumService _albumService;
     readonly ContextMenuStrip _menu = new();
 
     readonly ToolStripMenuItem _claudeUsageItem = new("Claude …") { Enabled = false };
@@ -22,12 +24,15 @@ sealed class TrayAppContext : ApplicationContext
     readonly Dictionary<string, ToolStripMenuItem> _modeItems = new();
 
     public TrayAppContext(StatusService service, UsageFetcher usage, NetSpeedMonitor netMonitor,
-                          NowPlayingMonitor nowPlaying, StockMonitor stockMonitor, int port)
+                          NowPlayingMonitor nowPlaying, StockMonitor stockMonitor,
+                          ScreenMirrorService mirrorService, AlbumService albumService, int port)
     {
         _service = service;
         _usage = usage;
         _port = port;
-        _mirror = new MirrorForm(service, netMonitor, nowPlaying, stockMonitor);
+        _mirrorService = mirrorService;
+        _albumService = albumService;
+        _mirror = new MirrorForm(service, netMonitor, nowPlaying, stockMonitor, mirrorService, albumService);
 
         BuildMenu();
         _trayIcon = new NotifyIcon
@@ -91,6 +96,47 @@ sealed class TrayAppContext : ApplicationContext
         _menu.Items.Add(displayMenu);
         // (屏幕亮度在左键弹出的镜像页底部，做成滑条了)
 
+        _menu.Items.Add(MakeItem("投屏设置…（窗口/区域）", (_, _) =>
+        {
+            new MirrorSettingsDialog(_mirrorService).Show();
+        }));
+        _menu.Items.Add(MakeItem("相册设置…（目录/格式/间隔/顺序）", (_, _) =>
+        {
+            new AlbumSettingsDialog(_albumService).Show();
+        }));
+        var albumMenu = new ToolStripMenuItem("相册播放");
+        ToolStripMenuItem manualItem = null;
+        manualItem = MakeItem("手动播放（点此切换 自动/手动）", (_, _) =>
+        {
+            _albumService.ManualMode = !_albumService.ManualMode;
+            manualItem.Checked = _albumService.ManualMode;
+            _mirror.RefreshAlbumNow();
+        });
+        manualItem.CheckOnClick = false;
+        manualItem.Checked = _albumService.ManualMode;
+        var prevItem = MakeItem("上一张", (_, _) =>
+        {
+            _albumService.ManualMode = true;
+            manualItem.Checked = true;
+            _albumService.PrevRgb565();
+            _mirror.RefreshAlbumNow();
+        });
+        var nextItem = MakeItem("下一张", (_, _) =>
+        {
+            _albumService.ManualMode = true;
+            manualItem.Checked = true;
+            _albumService.NextManualRgb565();
+            _mirror.RefreshAlbumNow();
+        });
+        var randItem = MakeItem("随机一张", (_, _) =>
+        {
+            _albumService.ManualMode = true;
+            manualItem.Checked = true;
+            _albumService.RandomRgb565();
+            _mirror.RefreshAlbumNow();
+        });
+        albumMenu.DropDownItems.AddRange(new ToolStripItem[] { manualItem, prevItem, nextItem, randItem });
+        _menu.Items.Add(albumMenu);
         _menu.Items.Add(MakeItem("设置自选股…", (_, _) =>
         {
             var input = InputDialog.Show(

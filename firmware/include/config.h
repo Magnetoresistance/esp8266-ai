@@ -15,9 +15,16 @@
 
 // ---- Backlight ----
 #define BRIGHTNESS_FILE "/brightness.txt"
+#define BRIGHTNESS_INVERT_FILE "/brightness_invert.txt"
 #define BRIGHTNESS_DEFAULT 100
-#define BRIGHTNESS_PWM_FREQ 2000 // Hz; high enough to avoid visible flicker when dim
+#define BRIGHTNESS_PWM_FREQ 2000 // Hz; default. Kept at 2kHz — user confirmed no camera-shutter banding impact.
 
-// ---- Display layout (240x240 ST7789) ----
-#define SCREEN_W 240
-#define SCREEN_H 240
+// ---- Display layout (128x128 GC9107) ----
+#define SCREEN_W 128
+#define SCREEN_H 128
+
+// ---- Display rotation (persisted, 0-7, applied at boot + on change) ----
+// Values 0-3: standard rotations (0°/90°CW/180°/270°CW)
+// Values 4-7: corresponding mirrored variants
+#define DISPLAY_CONFIG_FILE "/display.txt"
+#define DISPLAY_ROTATION_DEFAULT 0
