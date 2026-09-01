@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 小屏幕 · GC9107 版 — 网页一键烧录</title>
+<meta name="description" content="基于 pengchujin/esp8266-ai 二次开发的 ESP8266 AI 状态小屏（128×128 GC9107），支持浏览器一键烧录固件。">
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#161a22; --panel2:#1c2130; --line:#2a3040;
+    --txt:#e8eaf0; --dim:#9aa3b5; --accent:#7ee787; --accent2:#79c0ff; --warn:#ffa657; --red:#ff7b72;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--txt);font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.7}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 20px}
+  nav{position:sticky;top:0;z-index:10;background:rgba(13,15,20,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--txt)}
+  .brand .logo{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#2ea043,#79c0ff);display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+  nav .links{display:flex;gap:18px;font-size:14px}
+  nav .links a{color:var(--dim)}
+  nav .links a:hover{color:var(--txt)}
+  header{padding:72px 0 48px;text-align:center;border-bottom:1px solid var(--line);background:
+    radial-gradient(60% 50% at 50% 0%,rgba(121,192,255,.10),transparent)}
+  .badge{display:inline-block;font-size:13px;color:var(--accent);border:1px solid rgba(126,231,135,.35);background:rgba(126,231,135,.08);
+    border-radius:999px;padding:3px 14px;margin-bottom:18px}
+  h1{font-size:44px;line-height:1.25;margin-bottom:14px}
+  h1 .ai{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--dim);font-size:17px;max-width:640px;margin:0 auto 26px}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border-radius:10px;font-size:15px;font-weight:600;border:1px solid var(--line);color:var(--txt)}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(135deg,#238636,#2ea043);border-color:#2ea043;color:#fff}
+  .btn-ghost{background:var(--panel)}
+  .tags{margin-top:22px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;font-size:13px;color:var(--dim)}
+  .tags span{border:1px solid var(--line);border-radius:999px;padding:2px 12px;background:var(--panel)}
+  section{padding:56px 0}
+  section+section{border-top:1px solid var(--line)}
+  h2{font-size:28px;margin-bottom:8px}
+  h2 .en{color:var(--dim);font-weight:500;font-size:15px;margin-left:10px}
+  .lead{color:var(--dim);margin-bottom:28px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .card h3{font-size:16px;margin-bottom:6px}
+  .card p{font-size:14px;color:var(--dim)}
+  .card .new{color:var(--accent);font-size:12px;border:1px solid rgba(126,231,135,.35);border-radius:6px;padding:0 6px;margin-left:6px}
+  .flash-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:22px 0}
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px;font-size:14px;color:var(--dim)}
+  .step b{color:var(--txt);display:block;margin-bottom:4px}
+  .step .n{display:inline-block;width:22px;height:22px;border-radius:50%;background:#238636;color:#fff;text-align:center;line-height:22px;font-size:13px;margin-right:6px}
+  esp-web-install-button{margin:8px 0 6px;display:inline-block}
+  esp-web-install-button button{background:linear-gradient(135deg,#238636,#2ea043);border:none;color:#fff;font-size:16px;font-weight:700;
+    padding:13px 30px;border-radius:12px;cursor:pointer;font-family:inherit}
+  esp-web-install-button button:hover{filter:brightness(1.1)}
+  esp-web-install-button[unsupported] button{display:none}
+  .no-serial{display:none;background:rgba(255,166,87,.1);border:1px solid rgba(255,166,87,.4);color:var(--warn);border-radius:12px;padding:12px 16px;font-size:14px;margin-top:10px}
+  .note{font-size:13px;color:var(--dim);margin-top:10px}
+  .warnline{color:var(--warn);font-size:13.5px;margin-top:12px;background:rgba(255,166,87,.08);border:1px solid rgba(255,166,87,.35);border-radius:10px;padding:10px 14px}
+  .flash-meta{margin-top:14px;font-size:13px;color:var(--dim);font-family:var(--mono)}
+  .faq details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:10px}
+  .faq summary{cursor:pointer;font-weight:600;font-size:15px}
+  .faq details[open]{border-color:rgba(121,192,255,.4)}
+  .faq .a{margin-top:8px;font-size:14px;color:var(--dim)}
+  .faq .a a{word-break:break-all}
+  .plat{display:inline-block;font-size:12px;border-radius:6px;padding:0 8px;margin-right:8px;vertical-align:2px}
+  .plat.win{color:#79c0ff;border:1px solid rgba(121,192,255,.4)}
+  .plat.mac{color:#d2a8ff;border:1px solid rgba(210,168,255,.4)}
+  .credit{background:linear-gradient(135deg,rgba(126,231,135,.06),rgba(121,192,255,.06));border:1px solid var(--line);border-radius:16px;padding:26px}
+  .credit p{font-size:14.5px;color:var(--dim);margin-bottom:10px}
+  footer{border-top:1px solid var(--line);padding:26px 0;text-align:center;color:var(--dim);font-size:13px}
+  @media(max-width:640px){h1{font-size:32px}nav .links{display:none}}
+</style>
+<script type="module"
+  src="https://unpkg.com/esp-web-tools@10.5.7/dist/web/install-button.js?module"></script>
+</head>
+<body id="top">
+
+<nav>
+  <div class="wrap">
+    <span class="brand"><span class="logo">▶</span>AI 小屏幕 <span style="color:var(--dim);font-weight:400;font-size:13px">GC9107 版</span></span>
+    <span class="links">
+      <a href="#features">功能</a>
+      <a href="#flash">烧录固件</a>
+      <a href="#flash-faq">烧录 FAQ</a>
+      <a href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <span class="badge">基于 pengchujin/esp8266-ai 二次开发 · 感谢原作者开源</span>
+    <h1>桌上的一台 <span class="ai">AI 状态小电脑</span></h1>
+    <p class="sub">一块 128×128 的复古小电视（GC9107），实时显示 Claude Code / Codex CLI 的工作状态与额度，还能屏幕镜像、放相册、跳音乐频谱。无需任何 API key。</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#flash">▶ 烧录固件</a>
+      <a class="btn btn-ghost" href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">◆ 在 GitHub 查看</a>
+    </div>
+    <div class="tags">
+      <span>无需 API key</span><span>网页一键刷机</span><span>128×128 GC9107</span><span>1MB Flash 适配</span><span>硬件 + 软件全开源</span>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2>它能显示什么<span class="en">What it shows</span></h2>
+    <p class="lead">继承原项目全部能力，并新增三个页面。</p>
+    <div class="grid">
+      <div class="card"><h3>AI 工作状态与额度</h3><p>桌宠动起来 = AI 正在干活。方形进度环 + 大字显示 5 小时 / 周额度真实用量，等你审批时边框红闪。</p></div>
+      <div class="card"><h3>网速实时监视</h3><p>任务管理器风格的上下行曲线，滚动窗口自动调整量程。</p></div>
+      <div class="card"><h3>音乐播放显示</h3><p>专辑封面、歌名、歌手、进度条实时同步，自动切入切回。</p></div>
+      <div class="card"><h3>可换桌宠</h3><p>内置 petdex.dev 画廊 3300+ 开源桌宠，也可上传任意 GIF，板上直接解码。</p></div>
+      <div class="card"><h3>屏幕镜像<span class="new">新增</span></h3><p>PC 全屏 / 指定窗口 / 框选区域，实时镜像到小屏（Windows 桥接）。</p></div>
+      <div class="card"><h3>照片相册<span class="new">新增</span></h3><p>本地目录幻灯片轮播，间隔 / 顺序 / 随机切换随手控制。</p></div>
+      <div class="card"><h3>音乐频谱<span class="new">新增</span></h3><p>WASAPI 抓取系统音频做 24 段频谱，柱状 / 波形 / 环形十余种效果，不录制不存储音频。</p></div>
+      <div class="card"><h3>股票行情</h3><p>腾讯行情接口，涨红跌绿，中文名位图清晰显示。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="flash">
+  <div class="wrap">
+    <h2>网页一键烧录<span class="en">Flash from the browser</span></h2>
+    <p class="lead">在浏览器里完成烧录，不装任何工具。本页固件适配 <b>1MB Flash 的 ESP-12S</b>（DOUT 模式）。</p>
+
+    <div class="flash-box">
+      <div class="steps">
+        <div class="step"><b><span class="n">1</span>插上设备</b>用 USB <b>数据线</b>连接设备与电脑（很多线只能充电，烧不上请先换线）。</div>
+        <div class="step"><b><span class="n">2</span>连接并烧录</b>点下方按钮，在弹窗里选中串口（Windows 通常是 CH340 开头的 COM 口）。</div>
+        <div class="step"><b><span class="n">3</span>等待完成</b>烧录约 30~60 秒，设备自动重启开机，随后按屏幕提示配网。</div>
+      </div>
+
+      <esp-web-install-button manifest="./manifest.json" id="flashbtn">
+        <button slot="activate">▶ 连接设备并烧录</button>
+        <span slot="unsupported" class="no-serial" style="display:inline-block">当前浏览器不支持 Web Serial —— 请使用桌面版 Chrome 或 Edge 打开本页（手机与 360 / QQ 等浏览器不支持）。</span>
+        <span slot="not-allowed" class="no-serial" style="display:inline-block">浏览器未授予串口权限，请在弹窗中点击「允许」。</span>
+      </esp-web-install-button>
+
+      <p class="flash-meta">固件 v0.5.1 · ESP8266 · DOUT · 仅固件 @ 0x0（871 KB，1MB Flash 布局）</p>
+
+      <div class="warnline">⚠ 本页烧录的是 <b>GC9107 128×128 · 1MB Flash</b> 定制固件（本 fork 硬件）。如果你用的是原版 240×240 的 SD2 小电视，<b>请勿使用本页</b>，请到 <a href="https://mac.qust.me/#flash" target="_blank" rel="noopener">原作者官网 mac.qust.me</a> 烧录。</div>
+      <p class="note">首次烧录建议在弹窗中勾选<b>擦除设备</b>。串口弹窗是空的？见<a href="#flash-faq">下方排查</a>。</p>
+    </div>
+  </div>
+</section>
+
+<section id="flash-faq" class="faq">
+  <div class="wrap">
+    <h2>烧录常见问题<span class="en">Troubleshooting</span></h2>
+    <p class="lead">按设备管理器 / 浏览器表现对号入座。</p>
+
+    <details>
+      <summary><span class="plat win">Windows</span>设备管理器里看不到 CH340 串口</summary>
+      <div class="a">先换一根 <b>USB 数据线</b>（多数线只能充电），并换个 USB 口。若仍没有，安装 <a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH340 驱动（CH341SER.EXE）</a>后重新插拔。</div>
+    </details>
+    <details>
+      <summary><span class="plat win">Windows</span>CH340 带黄色感叹号，提示「该设备无法启动 (代码 10)」</summary>
+      <div class="a">板载 CH340 是兼容芯片，被新版官方驱动拦截：卸载现有驱动，改装 <a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH341SER 3.5 旧版驱动</a>；设备管理器里右键设备 → 更新驱动程序 → 浏览计算机 → 选择旧版本。</div>
+    </details>
+    <details>
+      <summary><span class="plat win">Windows</span>串口一切正常，但浏览器弹窗里没有端口</summary>
+      <div class="a">用<b>官方 Chrome 或 Edge</b> 重新打开本页（360、QQ 等浏览器阉割了 Web Serial），并关闭 Arduino IDE、串口监视器、桥接程序等占用串口的软件后重试。</div>
+    </details>
+    <details>
+      <summary><span class="plat win">Windows</span>串口芯片不是 CH340？</summary>
+      <div class="a">看一眼板子串口芯片丝印：如果是 <b>CH9102</b> 或 <b>CP2102</b>，Windows 需安装对应驱动；Mac 依然免驱。</div>
+    </details>
+    <details>
+      <summary><span class="plat mac">macOS</span>需要装驱动吗？</summary>
+      <div class="a"><b>不需要</b> —— macOS 自带 CH340 驱动。若之前装过第三方驱动被系统拦截，到「系统设置 → 隐私与安全性」允许，或卸载后用系统自带驱动。</div>
+    </details>
+    <details>
+      <summary>烧录到一半失败 / 校验错误</summary>
+      <div class="a">换一根质量好的数据线、换个 USB 口（优先直连主板，避开 Hub），关闭占用串口的程序后重试；弹窗中勾选<b>擦除设备</b>再烧一次。</div>
+    </details>
+    <details>
+      <summary>1MB Flash 版有什么限制？</summary>
+      <div class="a">1MB 芯片放不下固件 + 文件系统，因此本固件<b>不含文件系统分区</b>：亮度、频谱样式、显示旋转等设置重启后<b>不会保存</b>（每次开机为默认值），WiFi 配网与所有显示功能不受影响。4MB Flash 的板子可用仓库里的 nodemcuv2 完整版构建。</div>
+    </details>
+    <details>
+      <summary>烧录成功后设备黑屏 / 花屏 / 颜色不对</summary>
+      <div class="a">本固件适配 <b>GC9107 128×128</b> 屏。如果是其他屏幕（如 240×240 ST7789 的 SD2），请勿使用本页固件 —— 去<a href="https://mac.qust.me" target="_blank" rel="noopener">原作者官网</a>。颜色不对可在固件配置里切换旋转与背光极性。</div>
+    </details>
+    <details>
+      <summary>烧完后开机要做什么？</summary>
+      <div class="a">首次开机会建热点 <b>AI-Clock-Setup</b>：手机连上自动弹配网页（或浏览器打开 192.168.4.1），选家里 WiFi 输密码。之后装 Windows 桥接程序（仓库 windows-app/ 自行编译，或见 GitHub Releases），同局域网自动配对。</div>
+    </details>
+  </div>
+</section>
+
+<section id="credits">
+  <div class="wrap">
+    <h2>致谢<span class="en">Credits</span></h2>
+    <div class="credit">
+      <p>本项目 fork 自 <b><a href="https://github.com/pengchujin" target="_blank" rel="noopener">@pengchujin</a></b> 的开源项目 <a href="https://github.com/pengchujin/esp8266-ai" target="_blank" rel="noopener">pengchujin/esp8266-ai</a>：固件架构、Mac / Windows 桥接程序、配网方案均出自原作者之手，<b>衷心感谢原作者的开源贡献</b>！</p>
+      <p>原项目官网 <a href="https://mac.qust.me" target="_blank" rel="noopener">mac.qust.me</a>（240×240 SD2 硬件的网页刷机、FAQ 与成品购买）。</p>
+      <p>开源依赖：<a href="https://github.com/bodmer/TFT_eSPI" target="_blank" rel="noopener">TFT_eSPI</a> · <a href="https://github.com/tzapu/WiFiManager" target="_blank" rel="noopener">WiFiManager</a> · <a href="https://github.com/bblanchon/ArduinoJson" target="_blank" rel="noopener">ArduinoJson</a> · <a href="https://github.com/bitbank2/AnimatedGIF" target="_blank" rel="noopener">AnimatedGIF</a> · <a href="https://github.com/naudio/NAudio" target="_blank" rel="noopener">NAudio</a> · <a href="https://github.com/esphome/esp-web-tools" target="_blank" rel="noopener">ESP Web Tools</a></p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">AI 小屏幕 GC9107 版 · fork of pengchujin/esp8266-ai · 硬件、固件、软件全部开源</div>
+</footer>
+
+</body>
+</html>

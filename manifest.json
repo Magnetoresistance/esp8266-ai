@@ -1,0 +1,13 @@
+{
+  "name": "AI \u5c0f\u5c4f\u5e55 (GC9107 128x128, 1MB Flash)",
+  "version": "0.5.1",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        { "path": "aiclock-0.5.1-firmware-1mb.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
