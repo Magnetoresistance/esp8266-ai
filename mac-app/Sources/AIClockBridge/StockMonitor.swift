@@ -21,7 +21,7 @@ final class StockMonitor {
     static var symbols: [String] {
         get {
             let raw = UserDefaults.standard.string(forKey: symbolsKey) ?? "sh000001"
-            return raw.replacingOccurrences(of: "ï¼Œ", with: ",") // CN comma happens
+            return raw.replacingOccurrences(of: "", with: ",") // CN comma happens
                 .split(separator: ",")
                 .map { normalize(String($0)) }
                 .filter { !$0.isEmpty }
@@ -52,7 +52,9 @@ final class StockMonitor {
     // rendered RGB565 strips (same trick as the music title strip): one
     // NAME_W x NAME_H strip per row, wire format [1 byte count][strips...].
     // names_rev in /stock tells the device when to re-fetch.
-    static let nameW = 156, nameH = 16
+    // Must match STOCK_NAME_W/STOCK_NAME_H in the firmware: the device
+    // downsamples 2x, so a 24px strip renders 12px tall on the panel.
+    static let nameW = 156, nameH = 24
     private var namesRev = 0
     private var namesData = Data([0])
     private var lastNamesKey = ""
@@ -120,7 +122,7 @@ final class StockMonitor {
         style.alignment = .right // sits left of the row's right edge, code is on the left
         style.lineBreakMode = .byTruncatingTail
         (name as NSString).draw(in: NSRect(x: 0, y: 1, width: w, height: h - 1), withAttributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .font: NSFont.systemFont(ofSize: 18, weight: .medium),
             .foregroundColor: NSColor(white: 0.72, alpha: 1),
             .paragraphStyle: style,
         ])
@@ -160,7 +162,7 @@ final class StockMonitor {
         }.resume()
     }
 
-    /// Response is lines of `v_sh600519="1~è´µå·žèŒ…å°~600519~1212.00~...";`
+    /// Response is lines of `v_sh600519="1~é?~600519~1212.00~...";`
     /// fields split by "~": [1]=name [3]=price [31]=change [32]=change%.
     static func parse(text: String, order: [String]) -> [Row] {
         var bySymbol: [String: Row] = [:]

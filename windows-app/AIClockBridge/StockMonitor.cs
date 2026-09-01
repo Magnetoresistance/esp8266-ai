@@ -23,7 +23,10 @@ sealed class StockMonitor
         {
             var raw = Settings.Get(SymbolsKey);
             if (raw.Length == 0) raw = "sh000001";
-            return raw.Replace('，', ',') // CN comma happens
+            // '\uFF0C' = full-width comma, kept as an escape so the source
+            // stays pure-ASCII (a literal one breaks csc if the file is ever
+            // resaved without a BOM and it falls back to the GBK codepage).
+            return raw.Replace('\uFF0C', ',') // CN comma happens
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(Normalize).ToArray();
         }
@@ -65,8 +68,14 @@ sealed class StockMonitor
     // rendered RGB565 strips (same trick as the music title strip): one
     // NameW x NameH strip per row, wire format [1 byte count][strips...].
     // names_rev in /stock tells the device when to re-fetch.
-    public const int NameW = 156, NameH = 16;
-    int _namesRev;
+    // Must match STOCK_NAME_W/STOCK_NAME_H in the firmware: the device
+    // downsamples 2x, so a 24px strip renders 12px tall on the panel
+    // (1.5x the old 16px strip for readability).
+    public const int NameW = 156, NameH = 24;
+    // Seeded from the clock so a restarted bridge never reuses a rev the
+    // device already drew (rev resets to 0 on restart -> device would think
+    // its strips are current and keep showing the old rendering forever).
+    int _namesRev = (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     byte[] _namesData = { 0 };
     string _lastNamesKey = "";
 
@@ -117,7 +126,7 @@ sealed class StockMonitor
             {
                 g.Clear(Color.Black);
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-                using var font = new Font("Microsoft YaHei UI", 9f);
+                using var font = new Font("Microsoft YaHei UI", 13.5f);
                 using var brush = new SolidBrush(Color.FromArgb(184, 184, 184));
                 using var right = new StringFormat
                 {
@@ -125,7 +134,12 @@ sealed class StockMonitor
                     Trimming = StringTrimming.EllipsisCharacter,
                     FormatFlags = StringFormatFlags.NoWrap,
                 };
-                g.DrawString(row.Name, font, brush, new RectangleF(0, 0, NameW, NameH), right);
+                // Vertical calibration (verified against the served strips):
+                // the firmware's 2x downsample keeps only EVEN source rows, so
+                // the first/last ink row must both be even or those strokes
+                // get dropped (clipped-looking names). dy=-3 puts the ink at
+                // source rows 2..20 and sits the name 1px above the value line.
+                g.DrawString(row.Name, font, brush, new RectangleF(0, -3, NameW, NameH), right);
             }
             ms.Write(Rgb565.Encode(bmp));
         }
@@ -158,7 +172,7 @@ sealed class StockMonitor
         }
     }
 
-    /// Response is lines of `v_sh600519="1~贵州茅台~600519~1212.00~...";`
+    /// Response is lines of `v_sh600519="1~??????~600519~1212.00~...";`
     /// fields split by "~": [1]=name [3]=price [31]=change [32]=change%.
     static Row[] Parse(string text, string[] order)
     {

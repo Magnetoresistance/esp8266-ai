@@ -25,14 +25,15 @@ sealed class TrayAppContext : ApplicationContext
 
     public TrayAppContext(StatusService service, UsageFetcher usage, NetSpeedMonitor netMonitor,
                           NowPlayingMonitor nowPlaying, StockMonitor stockMonitor,
-                          ScreenMirrorService mirrorService, AlbumService albumService, int port)
+                          ScreenMirrorService mirrorService, AlbumService albumService,
+                          SpectrumService spectrumService, int port)
     {
         _service = service;
         _usage = usage;
         _port = port;
         _mirrorService = mirrorService;
         _albumService = albumService;
-        _mirror = new MirrorForm(service, netMonitor, nowPlaying, stockMonitor, mirrorService, albumService);
+        _mirror = new MirrorForm(service, netMonitor, nowPlaying, stockMonitor, mirrorService, albumService, spectrumService);
 
         BuildMenu();
         _trayIcon = new NotifyIcon
@@ -103,6 +104,12 @@ sealed class TrayAppContext : ApplicationContext
         _menu.Items.Add(MakeItem("相册设置…（目录/格式/间隔/顺序）", (_, _) =>
         {
             new AlbumSettingsDialog(_albumService).Show();
+        }));
+        // music spectrum: opens a dedicated settings window (like the mirror
+        // settings dialog) where every option applies to the device live.
+        _menu.Items.Add(MakeItem("音乐频谱设置…", (_, _) =>
+        {
+            new SpectrumSettingsDialog().Show();
         }));
         var albumMenu = new ToolStripMenuItem("相册播放");
         ToolStripMenuItem manualItem = null;

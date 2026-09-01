@@ -75,11 +75,11 @@ unsigned long lastSwitchMs = 0;
 // Display override, settable from the Mac app via POST /api/display:
 // auto = follow working status, claude/codex = pin that app on screen,
 // net/music = show Mac-side telemetry pages instead of the pet.
-enum DisplayMode { MODE_AUTO, MODE_CLAUDE, MODE_CODEX, MODE_NET, MODE_MUSIC, MODE_STOCK, MODE_MIRROR, MODE_ALBUM };
+enum DisplayMode { MODE_AUTO, MODE_CLAUDE, MODE_CODEX, MODE_NET, MODE_MUSIC, MODE_STOCK, MODE_MIRROR, MODE_ALBUM, MODE_SPECTRUM };
 DisplayMode displayMode = MODE_AUTO;
 
 // When AUTO and the Mac reports audio playing, the screen auto-switches to the
-// music page and back when it stops — same spirit as the Claude/Codex auto
+// music page and back when it stops ?? same spirit as the Claude/Codex auto
 // switch. Only AUTO does this; a pinned mode is always honored as-is.
 bool statusMusicPlaying = false;
 DisplayMode lastEffectiveMode = MODE_AUTO;
@@ -109,7 +109,28 @@ bool netHeaderDirty = false;
 
 // Chart layout (task-manager style scrolling area chart, newest at the right)
 // - sized for the 128px panel.
-const int NET_CHART_X = 4, NET_CHART_Y = 34, NET_CHART_W = 120, NET_CHART_H = 52;
+// NET_CHART_Y is intentionally placed well below the scale label text zone
+// (see constants below) so the 52-row pushImage loop never overlaps the
+// label pixels. Previously NET_CHART_Y=34 overlapped the last 5 rows of
+// the font1 scale text (Y=31..38) -> the user-visible defect was "max
+// value display still covered by the scrolling net curve".
+const int NET_CHART_X = 4, NET_CHART_Y = 41, NET_CHART_W = 120, NET_CHART_H = 52;
+// Scale label (adaptive "full-scale speed" like "69k") sits in fixed canvas
+// coordinates [rule #1 of XP 100025465 for side-legend UI text]. Previous
+// Y=31 top-aligned exactly with the last row (Y=31) of the UP header
+// value's 18-row-tall fillRect clear, which black-wiped 1 row of the top
+// glyph pixels whenever the upload number changed -> user visible "UP
+// number covers the max value display just a little bit". Moving it down
+// by 2 rows gives a 1-row clear gap vs. UP header clear (Y=31) and still
+// leaves 1 row vs. chart top (chart starts at 41, label bottom = 40).
+// Zone: Y=33..40 (font1 cell height 8).
+const int NET_SCALE_LABEL_Y = 33;
+const int NET_SCALE_LABEL_H = 8;
+// Safety check (compile-time would be nice, but we assert geometry at the
+// definition site anyway): label bottom = 33+8 = 41, chart first pixel row = 41,
+// so label occupies Y=[33,40] and chart starts writing at Y=[41]; no overlap
+// even though they abut (1-row air gap between last label row and chart
+// start is actually label Y=40 vs chart Y=41 - they are adjacent).
 long netHistRx[NET_CHART_W], netHistTx[NET_CHART_W]; // one 250ms sample per column
 long netScale = 10240;    // current "nice" full-scale value (whole chart shares it)
 String netLastDl, netLastUl, netLastScaleText; // change detection for partial redraws
@@ -146,8 +167,10 @@ String stockLastCode[MAX_STOCKS]; // top line (code + CJK name strip)
 String stockLastVal[MAX_STOCKS];  // value line (price + pct)
 unsigned long lastStockPollMs = 0;
 // CJK names come as Mac-rendered RGB565 strips (GET /stock/names.raw, one
-// 156x16 strip per row) - names_rev says when to re-fetch. -1 = not drawn.
-const int STOCK_NAME_W = 156, STOCK_NAME_H = 16;
+// 156x24 strip per row) - names_rev says when to re-fetch. -1 = not drawn.
+// 24px source at 2x downsample = 12px on panel (1.5x the old 16px strip),
+// must match the bridge's NameW/NameH (no size negotiation on the wire).
+const int STOCK_NAME_W = 156, STOCK_NAME_H = 24;
 int stockNamesRev = -1;
 int stockNamesDrawnRev = -1;
 
@@ -159,6 +182,62 @@ int musicTextRev = -1;
 bool musicHasArtwork = false;
 bool musicChromeDrawn = false;
 unsigned long lastMusicPollMs = 0;
+
+// ---- music spectrum (bridge computes bars from system audio) ----
+int spectrumType = SPECTRUM_DEFAULT_TYPE;     // 0 bars / 1 wave / 2 radial
+int spectrumEffect = SPECTRUM_DEFAULT_EFFECT; // per-type effect index
+int spectrumColor = SPECTRUM_DEFAULT_COLOR;   // 0..7 palette index
+int spectrumColor2 = SPECTRUM_DEFAULT_COLOR2; // 0..7 secondary (combo styles)
+int spectrumPeak = SPECTRUM_DEFAULT_PEAK;     // 0=off 1=on peak dots
+int spectrumSmooth = SPECTRUM_DEFAULT_SMOOTH; // 0..10 time smoothing
+int spectrumWidth = SPECTRUM_DEFAULT_WIDTH;   // 1..5 bar width
+int spectrumRainbow = SPECTRUM_DEFAULT_RAINBOW; // 0=solid 1=spectrum by value
+// per-type fine-tuning:
+int spectrumGap = 1;        // 0..2 bar gap (bars type)
+int spectrumDecay = 5;      // 1..10 peak-hold decay speed (higher = faster fall)
+int spectrumLineW = 1;      // 1..3 wave line thickness (wave type)
+int spectrumFill = 0;       // 0=line only 1=fill under wave (wave type)
+int spectrumFillColor = 0;  // 0..7 palette for the wave fill area
+// radial/ring type fine-tuning:
+int spectrumRingW = 2;      // 1..4 ring line thickness
+int spectrumRingGap = 2;    // 0..4 gap between ring spokes/bars
+int spectrumRingInner = 12; // 4..40 inner circle radius (px)
+int spectrumRingOuter = 58; // 20..64 outer circle radius (px)
+int spectrumRingInColor = 1;  // 0..7 palette + 8=black + 9=off (no ring)
+int spectrumRingFill = 1;     // 0=line only 1=fill ribbon (ring polyline)
+// ????? (color 11) gradient tuning:
+int spectrumGradRange = SPECTRUM_DEFAULT_GRAD_RANGE;   // 0..100% screen height
+int spectrumGradReverse = SPECTRUM_DEFAULT_GRAD_REVERSE; // 0=???? 1=????
+// bars-type dynamic range:
+int spectrumAutoRange = SPECTRUM_DEFAULT_AUTORANGE; // 1=normalize to live min/max
+int spectrumOffset = SPECTRUM_DEFAULT_OFFSET;       // -100..100 height offset
+int spectrumSilence = SPECTRUM_DEFAULT_SILENCE;     // 0..50 silence gate
+int spectrumMirror = SPECTRUM_DEFAULT_MIRROR;       // 1=mirror bars/wave vertically
+int spectrumDualRing = SPECTRUM_DEFAULT_DUALRING;   // 1=dual-ring for ring/fan
+int spectrumDualInner = SPECTRUM_DEFAULT_DUAL_INNER; // dual-ring inner sweep %
+int spectrumDualOuter = SPECTRUM_DEFAULT_DUAL_OUTER; // dual-ring outer reach %
+byte spectrumBars[SPECTRUM_BARS];             // 0..255 per bar
+float spectrumSmoothed[SPECTRUM_BARS];        // smoothed values (spectrumSmooth)
+// adaptive rainbow range: tracks the live min/max of the bars so the color
+// sweep always spans the *actual* current range (long playback sessions keep
+// vivid color variation instead of a near-constant hue).
+float spectrumRainbowMin = 0;
+float spectrumRainbowMax = 255;
+byte spectrumPeaks[SPECTRUM_BARS];            // peak-hold state for style 3
+bool spectrumData = false;                    // true once a frame arrived
+unsigned long lastSpectrumPollMs = 0;
+// incremental-draw state: previous frame's geometry so we only repaint the
+// changed pixels instead of clearing the whole panel (removes flicker).
+byte prevSpectrumH[SPECTRUM_BARS];            // last bar height (px) per slot
+int prevWaveY[SPECTRUM_BARS];                 // last waveform y per slot
+int prevWaveY2[SPECTRUM_BARS];                // last mirrored-wave y per slot
+byte prevPeakY[SPECTRUM_BARS];                // last peak dot y per slot
+byte prevRadialR[SPECTRUM_BARS];              // last radial length per slot
+byte prevRadialInner[SPECTRUM_BARS];          // last dual-ring inner radius offset
+bool spectrumFirstDraw = true;                // needs a full clear first
+int lastSpectrumStyleDrawn = -1;              // style that is currently on screen
+byte lastDrawnBars[SPECTRUM_BARS];            // bars of the last painted frame
+int lastSpectrumParamKey = -1;                // param hash of the last frame
 
 int claudeFrame = 0;
 int codexFrame = 0;
@@ -203,7 +282,7 @@ bool mainUiShown = false;      // false while the config-portal screen is up
 bool webServerStarted = false; // deferred: port 80 clashes with the portal
 
 // ---------- backlight brightness ----------
-// The panel backlight (TFT_BL, active LOW) is PWM-dimmable — the vendor's own
+// The panel backlight (TFT_BL, active LOW) is PWM-dimmable ?? the vendor's own
 // firmware does the same. 0 = off, 100 = full. Persisted so it survives reboot.
 
 int brightness = BRIGHTNESS_DEFAULT; // 0-100
@@ -309,6 +388,106 @@ void saveDisplayConfig() {
   File f = LittleFS.open(DISPLAY_CONFIG_FILE, "w");
   if (!f) return;
   f.println(displayRotation);
+  f.close();
+}
+
+// ---------- music spectrum style persistence ----------
+
+void loadSpectrumStyle() {
+  if (!LittleFS.exists(SPECTRUM_STYLE_FILE)) return;
+  File f = LittleFS.open(SPECTRUM_STYLE_FILE, "r");
+  if (!f) return;
+  // 28 lines: type / effect / color / color2 / peak / smooth / width /
+  // rainbow / gap / decay / linew / fill / ringw / ringgap / ringinner /
+  // ringouter / fillcolor / ringincolor / ringfill / gradrange / gradreverse
+  // / autorange / offset / silence / mirror / dualring / dualinner / dualouter
+  int lines[28] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+                    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+  int idx = 0;
+  while (f.available() && idx < 28) {
+    lines[idx++] = f.readStringUntil('\n').toInt();
+  }
+  f.close();
+  if (lines[1] < 0) {
+    // legacy flat-style file: single line 0-11 -> type+effect
+    int old = lines[0];
+    switch (old) {
+      case 1: spectrumType = 0; spectrumEffect = 1; break;  // mirror bars
+      case 2: spectrumType = 1; spectrumEffect = 0; break;  // wave line
+      case 3: spectrumType = 0; spectrumEffect = 2; break;  // peak-hold
+      case 4: spectrumType = 2; spectrumEffect = 0; break;  // radial ring
+      case 5: spectrumType = 0; spectrumEffect = 3; break;  // twin
+      case 6: spectrumType = 0; spectrumEffect = 4; break;  // dotted
+      case 7: spectrumType = 0; spectrumEffect = 5; break;  // glow
+      case 8: spectrumType = 1; spectrumEffect = 1; break;  // mirror wave
+      case 9: spectrumType = 0; spectrumEffect = 6; break;  // fire
+      case 10: spectrumType = 1; spectrumEffect = 2; break; // aurora
+      case 11: spectrumType = 2; spectrumEffect = 1; break; // starry
+      default: spectrumType = 0; spectrumEffect = 0; break; // classic
+    }
+  } else {
+    if (lines[0] >= 0 && lines[0] <= 2) spectrumType = lines[0];
+    if (lines[1] >= 0 && lines[1] <= 7) spectrumEffect = lines[1];
+  }
+  if (lines[2] >= 0 && lines[2] <= 11) spectrumColor = lines[2];
+  if (lines[3] >= 0 && lines[3] <= 11) spectrumColor2 = lines[3];
+  if (lines[4] == 0 || lines[4] == 1) spectrumPeak = lines[4];
+  if (lines[5] >= 0 && lines[5] <= 10) spectrumSmooth = lines[5];
+  if (lines[6] >= 1 && lines[6] <= 5) spectrumWidth = lines[6];
+  if (lines[7] == 0 || lines[7] == 1) spectrumRainbow = lines[7];
+  if (lines[8] >= 0 && lines[8] <= 4) spectrumGap = lines[8];
+  if (lines[9] >= 1 && lines[9] <= 20) spectrumDecay = lines[9];
+  if (lines[10] >= 1 && lines[10] <= 5) spectrumLineW = lines[10];
+  if (lines[11] == 0 || lines[11] == 1) spectrumFill = lines[11];
+  if (lines[12] >= 1 && lines[12] <= 8) spectrumRingW = lines[12];
+  if (lines[13] >= 0 && lines[13] <= 10) spectrumRingGap = lines[13];
+  if (lines[14] >= 2 && lines[14] <= 60) spectrumRingInner = lines[14];
+  if (lines[15] >= 20 && lines[15] <= 64) spectrumRingOuter = lines[15];
+  if (lines[16] >= 0 && lines[16] <= 11) spectrumFillColor = lines[16];
+  if (lines[17] >= 0 && lines[17] <= 9) spectrumRingInColor = lines[17];
+  if (lines[18] == 0 || lines[18] == 1) spectrumRingFill = lines[18];
+  if (lines[19] >= 0 && lines[19] <= 100) spectrumGradRange = lines[19];
+  if (lines[20] == 0 || lines[20] == 1) spectrumGradReverse = lines[20];
+  if (lines[21] == 0 || lines[21] == 1) spectrumAutoRange = lines[21];
+  if (lines[22] >= -100 && lines[22] <= 100) spectrumOffset = lines[22];
+  if (lines[23] >= 0 && lines[23] <= 50) spectrumSilence = lines[23];
+  if (lines[24] == 0 || lines[24] == 1) spectrumMirror = lines[24];
+  if (lines[25] == 0 || lines[25] == 1) spectrumDualRing = lines[25];
+  if (lines[26] >= 0 && lines[26] <= 100) spectrumDualInner = lines[26];
+  if (lines[27] >= 0 && lines[27] <= 100) spectrumDualOuter = lines[27];
+}
+
+void saveSpectrumStyle() {
+  File f = LittleFS.open(SPECTRUM_STYLE_FILE, "w");
+  if (!f) return;
+  f.println(spectrumType);
+  f.println(spectrumEffect);
+  f.println(spectrumColor);
+  f.println(spectrumColor2);
+  f.println(spectrumPeak);
+  f.println(spectrumSmooth);
+  f.println(spectrumWidth);
+  f.println(spectrumRainbow);
+  f.println(spectrumGap);
+  f.println(spectrumDecay);
+  f.println(spectrumLineW);
+  f.println(spectrumFill);
+  f.println(spectrumRingW);
+  f.println(spectrumRingGap);
+  f.println(spectrumRingInner);
+  f.println(spectrumRingOuter);
+  f.println(spectrumFillColor);
+  f.println(spectrumRingInColor);
+  f.println(spectrumRingFill);
+  f.println(spectrumGradRange);
+  f.println(spectrumGradReverse);
+  f.println(spectrumAutoRange);
+  f.println(spectrumOffset);
+  f.println(spectrumSilence);
+  f.println(spectrumMirror);
+  f.println(spectrumDualRing);
+  f.println(spectrumDualInner);
+  f.println(spectrumDualOuter);
   f.close();
 }
 
@@ -431,7 +610,7 @@ bool bridgeStale() {
 }
 
 // True when the app currently on screen is waiting on a permission/approval
-// prompt — drives the red "look now, act" border flash.
+// prompt ?? drives the red "look now, act" border flash.
 bool currentAppNeedsInput() {
   return currentApp == APP_CLAUDE ? claudeStatus.needsInput : codexStatus.needsInput;
 }
@@ -525,7 +704,7 @@ String pctText(float pct) {
 // Quota readout below the sprite: two columns ("5h" / "Wk"), small grey label
 // over a big font-4 percentage. Values repaint only when their text changes
 // (force = after a full-screen clear), so the 5s poll never flashes them.
-const int QUOTA_LABEL_Y = 96, QUOTA_VALUE_Y = 108;
+const int QUOTA_LABEL_Y = 96, QUOTA_VALUE_Y = 104;
 const int QUOTA_COL1_X = 32, QUOTA_COL2_X = 96;
 String lastQuota5h, lastQuotaWk;
 
@@ -721,10 +900,36 @@ void drawQuotaText(float hourPct, float weekPct, bool force) {
   // primary_pct=null, so collapse to a single centered "Wk" column.
   bool single = hourPct < 0 && weekPct >= 0;
   static int8_t lastSingle = -1;
+
+  // ---- Bounding box safety (per Experience 100010326): keep every
+  // fillRect STRICTLY inside the ring. Ring columns:
+  //   left   : [2, 8]  -> quota rects must start at X >= 9
+  //   right  : [120,126] -> quota rects must end   at X <= 119
+  // The previous 64px-wide column clears (X=0..64 / 64..128) overshot into
+  // both side rings and erased the ~6 vertical pixels at the height of the
+  // quota value row -> exactly the "both sides of the bottom % numbers are
+  // clipped" symptom the user reported.
+  //
+  // Real text geometry (pitch=2 r=1 for values, pitch=1 d=1 for labels):
+  //   Value "100%"  4 chars: 4 * 13 - 2 = 50 wide  -> half = 25 + 2 pad = 27
+  //   Value "100"   3 chars: 3 * 13 - 2 = 37 wide  -> half = 19 + 2 pad = 21
+  //   Label "Wk"               sqTextWidth ~11     -> half = 6 + 1 pad = 7
+  // Use halfWidth = 27 for single column (covers worst case "100%"), = 21
+  // for dual columns ("100"/"80"/... never more than 3 chars because
+  // pctText caps at int percent + "%" = up to "100%"). But at QUOTA_COL1_X=32
+  // half=27 would start at X=5, still inside the left ring [2..8]; so clamp
+  // to safe half = 23 -> col1 X??[9,55] and col2 X??[73,119].
+  const int VAL_HALF_WIDE = 27;   // single-col worst case
+  const int VAL_HALF_NARROW = 23; // dual-col safe (stay clear of both rings)
+  const int LBL_HALF = 9;        // "5h"/"Wk" labels + pad
+  const int QUOTA_BAR_H = QUOTA_VALUE_Y + 15 - QUOTA_LABEL_Y; // label row + value row = 23
+
   if ((int8_t)single != lastSingle) {
     lastSingle = (int8_t)single;
     force = true;
-    tft.fillRect(0, QUOTA_LABEL_Y, SCREEN_W, QUOTA_VALUE_Y + 15 - QUOTA_LABEL_Y, TFT_BLACK);
+    // Layout-swap clear: keep inside the ring (X??[9..119]) to avoid erasing
+    // the side rails. Width = 119 - 9 = 110, centered on SCREEN_CX=64 -> X=9.
+    tft.fillRect(9, QUOTA_LABEL_Y, 110, QUOTA_BAR_H, TFT_BLACK);
   }
   if (single) {
     if (force) drawSqTextC("Wk", SCREEN_CX, QUOTA_LABEL_Y, 1, 1, TFT_LIGHTGREY);
@@ -732,7 +937,9 @@ void drawQuotaText(float hourPct, float weekPct, bool force) {
     if (force || v != lastQuotaWk) {
       lastQuotaWk = v;
       lastQuota5h = "";
-      tft.fillRect(SCREEN_CX - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+      int half = min(VAL_HALF_WIDE, (int)dotTextWidth(v, 2, 1) / 2 + 3);
+      // Clamp to ring-safe X??[9..119]: CX=64 half=27 -> [37..91] (well inside)
+      tft.fillRect(SCREEN_CX - half, QUOTA_VALUE_Y, 2 * half, 15, TFT_BLACK);
       drawDotTextC(v, SCREEN_CX, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
     }
     return;
@@ -744,12 +951,16 @@ void drawQuotaText(float hourPct, float weekPct, bool force) {
   String v1 = pctText(hourPct), v2 = pctText(weekPct);
   if (force || v1 != lastQuota5h) {
     lastQuota5h = v1;
-    tft.fillRect(QUOTA_COL1_X - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+    int half = min(VAL_HALF_NARROW, (int)dotTextWidth(v1, 2, 1) / 2 + 3);
+    // COL1_X=32: left edge = 32 - 23 = 9 (abuts left ring inner edge)
+    tft.fillRect(QUOTA_COL1_X - half, QUOTA_VALUE_Y, 2 * half, 15, TFT_BLACK);
     drawDotTextC(v1, QUOTA_COL1_X, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
   }
   if (force || v2 != lastQuotaWk) {
     lastQuotaWk = v2;
-    tft.fillRect(QUOTA_COL2_X - 32, QUOTA_VALUE_Y, 64, 15, TFT_BLACK);
+    int half = min(VAL_HALF_NARROW, (int)dotTextWidth(v2, 2, 1) / 2 + 3);
+    // COL2_X=96: right edge = 96 + 23 = 119 (abuts right ring inner edge)
+    tft.fillRect(QUOTA_COL2_X - half, QUOTA_VALUE_Y, 2 * half, 15, TFT_BLACK);
     drawDotTextC(v2, QUOTA_COL2_X, QUOTA_VALUE_Y, 2, 1, TFT_WHITE);
   }
 }
@@ -869,8 +1080,26 @@ void drawAppLogo() {
 // Days until the weekly window resets, top-right corner inside the ring
 // (mirrors the app logo top-left). Weekly only - the 5h window is too short
 // for a day count to say anything. Under a day it degrades to hours.
-// Compact position for the 128px panel, clear of the ring edge.
-const int RESET_CX = 112, RESET_LABEL_Y = 10, RESET_VALUE_Y = 24;
+//
+// Bounding-box-derived layout (see Experience 100010326): all geometry flows
+// from a single right-aligned anchor so the clear rect never overshoots the
+// 128px panel. The old RESET_CX=112 put the "RESET" label's right edge at
+// ~131px (off-screen); here we compute a safe CX from the widest expected
+// label/value pair and keep the clear rect inside that same box.
+// Right progress ring (drawSquareRing line 640): x = 128-2-6 = 120..126.
+// Reset text's right edge must land BEFORE 120 so it never overlaps the ring.
+// Widest pair: half-width 19. Ring inner edge 120 minus 1px safety gap
+// minus half-width 19 -> CX = 100. Margin from screen edge = 128-19-100 = 9.
+// (= original margin 6 + half-ring-width 3, per user request "move in by
+// half the progress bar width").
+const int RESET_RIGHT_MARGIN = 9;                 // 128 -> CX: 9px gap to outer edge of text half-width
+const int RESET_LABEL_Y = 10, RESET_VALUE_Y = 24;
+const int RESET_CX = SCREEN_W - RESET_RIGHT_MARGIN - 19;  // = 100, right edge lands at 119 (inside ring)
+// Clear rect sourced from the same anchor: stays inside x = [80..120], i.e.
+// abuts the ring without touching it.
+const int RESET_CLEAR_LPAD = 20;                  // >= max half-width (19) + 1
+const int RESET_CLEAR_W = RESET_CLEAR_LPAD + 19 + 1;  // leftPad + rightHalf + padRight = 40; right edge = 120
+const int RESET_CLEAR_H = (RESET_VALUE_Y + 21) - RESET_LABEL_Y + 1;  // labelTop to valueBottom
 String lastResetDays;
 
 String resetDaysText(int min) {
@@ -883,7 +1112,11 @@ void drawResetDays(bool force) {
   String t = resetDaysText(currentWeekResetMin());
   if (!force && t == lastResetDays) return;
   lastResetDays = t;
-  tft.fillRect(RESET_CX - 28, RESET_LABEL_Y, 52, RESET_VALUE_Y + 19 - RESET_LABEL_Y, TFT_BLACK);
+  // Homogeneous clear rect: same anchor as draw calls below, guaranteed to
+  // stay within the panel and only cover the RESET region (no stray erase of
+  // the ring or right edge pixels).
+  tft.fillRect(RESET_CX - RESET_CLEAR_LPAD, RESET_LABEL_Y,
+               RESET_CLEAR_W, RESET_CLEAR_H, TFT_BLACK);
   if (t.length() == 0) return;
   drawTinyBoldText("RESET", RESET_CX, RESET_LABEL_Y, TFT_LIGHTGREY);
   // 2 chars ("3d") get big 3px dots; 3 chars ("18h") drop a size to fit.
@@ -997,6 +1230,27 @@ bool updateActiveApp() {
   if (desired != currentApp) {
     currentApp = desired;
     lastSwitchMs = millis();
+    // --- Invalidate all cross-module paint caches so the next refresh (or
+    // the caller's drawActiveApp) redraws the ring/quota/reset against the
+    // NEW app's values. Without this, when e.g. Claude's ring pct happened
+    // to equal Codex's, drawSquareRing would short-circuit (see line 626)
+    // and leave the ring painted with the old app's track arc -> "??".
+    // Also covers the AUTO -> CODEX first-boot scenario where the user
+    // reports the Codex progress bar stays partial until they manually pin
+    // MODE_CODEX (which unconditionally calls drawActiveApp()).
+    ringLastPct = -1000;
+    ringLastColor = 1;              // sentinel != valid TFT color
+    lastQuota5h = "";               // force drawQuotaText repaint
+    lastQuotaWk = "";               //  "
+    lastResetDays = "";             // force drawResetDays repaint
+    showingCd = CD_NONE;            // force drawActiveApp's cd sync path
+    cdDeadlineMs = 0;               //  "
+    cdAnchorType = CD_NONE;         //  "
+    lastCountdown = "";             //  "
+    // Note: drawQuotaText's static lastSingle is internal to that function;
+    // clearing lastQuota5h/lastQuotaWk above causes it to run the force=true
+    // branch on its next invocation from refreshActiveApp(), which calls
+    // fillRect to rebuild the single/dual column layout from scratch.
     return true;
   }
   return false;
@@ -1042,8 +1296,17 @@ void drawNetChrome() {
   tft.setTextColor(0x7BEF, TFT_BLACK);
   tft.drawString("DOWN", 8, 4, 1);
   tft.drawString("UP", 68, 4, 1);
+  // Scale label: initial full-scale text, drawn DIRECTLY ABOVE the chart so
+  // rolling pushImage never covers it. Must match later dynamic repaint
+  // gate in drawNetChart() for geometry and anchor.
+  tft.setTextDatum(TR_DATUM);
+  tft.fillRect(NET_CHART_X, NET_SCALE_LABEL_Y, NET_CHART_W, NET_SCALE_LABEL_H, TFT_BLACK);
+  String sc = speedText(netScale);
+  netLastScaleText = sc; // prime cache so dynamic gate won't re-paint until value changes
+  tft.drawString(sc, NET_CHART_X + NET_CHART_W, NET_SCALE_LABEL_Y, 1);
+  tft.setTextDatum(TL_DATUM);
   tft.setTextDatum(TC_DATUM);
-  tft.drawString("MAC NET  -  56s", SCREEN_CX, 120, 1); // below the CPU/MEM row
+  tft.drawString("PC NET  -  30s", SCREEN_CX, 120, 1); // below the CPU/MEM row
 }
 
 // Mac CPU / memory usage row between the chart and the footer: small grey
@@ -1086,21 +1349,38 @@ void drawNetSysinfoIfChanged() {
 }
 
 // Header readouts (1s-averaged), each repainted only when its text changes.
+// Per experience 100001838: treat overflow on the TEXT NODE (not container).
+// Instead of fixed 60/56px clear rects, measure the OLD + NEW string width and
+// take the bounding union width. TFT_eSPI font2 cell width = 12px so we can
+// just compute width = max(oldLen,newLen)*12 + 2pad. Also right-clamp so the
+// clear rect never goes beyond X=127, which was the root cause of the
+// trailing "/s" unit character ("s") being left behind when a long upload
+// value (e.g. "10.0M/s") was replaced by a shorter one whose fixed clear
+// rect didn't reach X=124-128.
+static int netFont2CellW() { return 12; }
+
 void drawNetHeaderIfChanged() {
   String dl = speedText(netCurRx) + "/s";
   String ul = speedText(netCurTx) + "/s";
   tft.setTextDatum(TL_DATUM);
+  const int CELL_W = 12;
   if (dl != netLastDl) {
+    int w = max((int)dl.length(), (int)netLastDl.length()) * CELL_W + 2;
+    int x = 8;
+    if (x + w > SCREEN_W) w = SCREEN_W - x; // clamp to panel right edge
+    tft.fillRect(x, 14, w, 18, TFT_BLACK);
     netLastDl = dl;
-    tft.fillRect(8, 14, 60, 18, TFT_BLACK);
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawString(dl, 8, 14, 2);
+    tft.drawString(dl, x, 14, 2);
   }
   if (ul != netLastUl) {
+    int w = max((int)ul.length(), (int)netLastUl.length()) * CELL_W + 2;
+    int x = 68;
+    if (x + w > SCREEN_W) w = SCREEN_W - x; // NEVER let clear overshoot X=127
+    tft.fillRect(x, 14, w, 18, TFT_BLACK);
     netLastUl = ul;
-    tft.fillRect(68, 14, 56, 18, TFT_BLACK);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString(ul, 68, 14, 2);
+    tft.drawString(ul, x, 14, 2);
   }
 }
 
@@ -1125,7 +1405,7 @@ void drawNetChart() {
   // Per-column heights (3-tap smoothed), then per-column line "bands": each
   // band spans from the previous column's height to this one's, so steep
   // rises/falls render as connected vertical strokes instead of detached
-  // stair-step dots — that's what makes the undulation read as a continuous
+  // stair-step dots ?? that's what makes the undulation read as a continuous
   // line, like the Mac mirror's stroked polyline.
   static uint8_t hRx[NET_CHART_W], hTx[NET_CHART_W];
   static uint8_t dlLo[NET_CHART_W], dlHi[NET_CHART_W]; // DL edge band, incl. 3px weight
@@ -1165,14 +1445,19 @@ void drawNetChart() {
     if ((row & 31) == 31) yield();
   }
 
-  // axis label (outside the chart, so it never gets repainted over)
+  // Axis label: adaptive full-scale speed (e.g. "69k") drawn right-aligned
+  // ABOVE the chart (NET_SCALE_LABEL_Y = NET_CHART_Y - 3), so it is 100%
+  // outside the pushImage row range (row 0 maps to NET_CHART_Y not below).
+  // This fixes the user-reported bug where the label lived inside the chart
+  // at y=48 and every 250ms the chart's row-14 pushImage overwrote it with
+  // black/green -> only visible on mode-entry / scale-switch for ~250ms.
   String scaleText = speedText(netScale);
   if (scaleText != netLastScaleText) {
     netLastScaleText = scaleText;
-    tft.fillRect(120, 48, 112, 10, TFT_BLACK);
+    tft.fillRect(NET_CHART_X, NET_SCALE_LABEL_Y, NET_CHART_W, NET_SCALE_LABEL_H, TFT_BLACK);
     tft.setTextDatum(TR_DATUM);
     tft.setTextColor(0x7BEF, TFT_BLACK);
-    tft.drawString(scaleText, NET_CHART_X + NET_CHART_W, 48, 1);
+    tft.drawString(scaleText, NET_CHART_X + NET_CHART_W, NET_SCALE_LABEL_Y, 1);
     tft.setTextDatum(TL_DATUM);
   }
 }
@@ -1302,7 +1587,7 @@ bool drawMusicCoverFromBridge() {
 }
 
 // Streams the Mac-rendered 232x44 title/artist strip and blits it row by
-// row — the only way to get CJK on screen without shipping a font.
+// row ?? the only way to get CJK on screen without shipping a font.
 bool drawMusicTextFromBridge() {
   if (WiFi.status() != WL_CONNECTED || bridgeHost.length() == 0) return false;
   WiFiClient client;
@@ -1389,6 +1674,958 @@ void drawMusicScreen(bool coverChanged, bool textChanged) {
   tft.drawString(timeText(musicElapsed) + " / " + timeText(musicDuration), SCREEN_CX, 116, 1);
 }
 
+// ---------- music spectrum drawing ----------
+// spectrumBars[] holds 24 magnitudes (0-255). Styles:
+//   0 bars          ?? classic bottom-up vertical bars
+//   1 mirrored      ?? symmetric bars spreading from the center column
+//   2 waveform      ?? connected line across the width
+//   3 peak-hold     ?? bars with a decaying peak dot above each bar
+//   4 radial        ?? bars radiating from the center
+// Palette index 0..7 selected by spectrumColor (see paletteSpectrum()).
+uint16_t paletteColor(int idx) {
+  switch (idx) {
+    case 1: return TFT_CYAN;
+    case 2: return TFT_YELLOW;
+    case 3: return TFT_ORANGE;
+    case 4: return TFT_RED;
+    case 5: return TFT_MAGENTA;
+    case 6: return TFT_WHITE;
+    case 7: return TFT_GREENYELLOW;
+    default: return TFT_GREEN;
+  }
+}
+uint16_t paletteSpectrum() { return paletteColor(spectrumColor); }
+
+// Spectrum-by-value: map 0..255 onto a hue sweep (blue??green??yellow??red)
+// so the bars glow across the spectrum with the audio magnitude. Used when
+// spectrumRainbow is enabled.
+uint16_t spectrumRainbowColor(int v) {
+  int h = (v * 300) / 255; // 0..300 -> hue
+  int sector = h / 60;
+  int f = h % 60;
+  int r, g, b;
+  switch (sector) {
+    case 0: r = 255; g = f * 255 / 60; b = 0; break;
+    case 1: r = 255 - f * 255 / 60; g = 255; b = 0; break;
+    case 2: r = 0; g = 255; b = f * 255 / 60; break;
+    case 3: r = 0; g = 255 - f * 255 / 60; b = 255; break;
+    case 4: r = f * 255 / 60; g = 0; b = 255; break;
+    default: r = 255; g = 0; b = 255 - f * 255 / 60; break;
+  }
+  return tft.color565(r, g, b);
+}
+void drawSpectrum() {
+  if (!spectrumData) {
+    tft.fillScreen(TFT_BLACK);
+    spectrumFirstDraw = true;
+    return;
+  }
+  const int n = SPECTRUM_BARS;
+  const int bw = SCREEN_W / n;              // bar slot width (5 for 24/128)
+  const int maxH = SCREEN_H - 12;           // leave a bottom margin
+  uint16_t barColor = paletteSpectrum();
+  // bar width: spectrumWidth 1..5 ?? 2..bw-1 px (thicker = more solid)
+  int barBase = max(2, (bw - 1) * spectrumWidth / 5);
+  // per-type fine-tuning: gap narrows the bars (bars type)
+  int barGap = spectrumGap;
+  int effW = max(1, barBase - barGap);
+  // bars-type dynamic range: when spectrumAutoRange is on, normalize each bar
+  // to the live [min,max] envelope so the spectrum always fills the panel;
+  // spectrumOffset then shifts the whole spectrum up (positive) or down
+  // (negative), in percent of maxH.
+  int liveMin = 255, liveMax = 0;
+  if (spectrumAutoRange) {
+    for (int i = 0; i < n; i++) {
+      if (spectrumBars[i] < liveMin) liveMin = spectrumBars[i];
+      if (spectrumBars[i] > liveMax) liveMax = spectrumBars[i];
+    }
+    if (liveMax - liveMin < 8) liveMax = liveMin + 8; // avoid div-by-zero
+  }
+  // normalized magnitude (0..255) with autoRange + offset applied, shared by
+  // all types (bars / wave / radial) so the offset & dynamic range work
+  // everywhere, not just on the bars.
+  auto barV = [&](int i) -> int {
+    int v = spectrumBars[i];
+    if (spectrumAutoRange) {
+      v = (v - liveMin) * 255 / (liveMax - liveMin);
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+    }
+    v += spectrumOffset * 255 / 100; // ???/????
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    return v;
+  };
+  auto barH = [&](int i) -> int {
+    int h = map(barV(i), 0, 255, 2, maxH);
+    if (h < 2) h = 2;
+    if (h > maxH) h = maxH;
+    return h;
+  };
+  // rainbow modes live inside the color choice now: color 0-7 = solid
+  // palette, 8 = ??????? (horizontal sweep across the bars, low??high hue),
+  // 9 = ????? (each bar's color follows its magnitude over the live range),
+  // 10 = ??????? (each bar is a vertical gradient from bottom hue to top).
+  auto colFor = [&](int i) -> uint16_t {
+    if (spectrumColor == 8) {
+      // ???????: hue sweeps with the bar index (left??right), independent
+      // of magnitude ?? a rainbow band across the whole spectrum.
+      int v = (i * 255) / (n > 1 ? n - 1 : 1);
+      if (spectrumGradReverse) v = 255 - v;
+      return spectrumRainbowColor(v);
+    }
+    if (spectrumColor == 9) {
+      // ?????: hue follows each bar's magnitude, mapped over the live
+      // adaptive range so the sweep tracks the current audio level.
+      float span = spectrumRainbowMax - spectrumRainbowMin;
+      if (span <= 0) span = 1;
+      int v = (int)((spectrumBars[i] - spectrumRainbowMin) * 255.0f / span);
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      if (spectrumGradReverse) v = 255 - v;
+      return spectrumRainbowColor(v);
+    }
+    return barColor;
+  };
+
+  // ??????? (color 10): a bar is painted with a fixed bottom??top hue
+  // gradient (bottom = low hue, top = high hue). ????? (color 11): the
+  // gradient is anchored to the SCREEN, not the bar ?? the hue at any y pixel
+  // is fixed (bottom = hue 0, top = hue 255), so every bar shows the same
+  // standing gradient; a taller bar (higher magnitude) simply reaches the
+  // next gradient color further up. Falls back to a solid color otherwise.
+  auto fillBar = [&](int i, int x, int y, int w, int h) {
+    if ((spectrumColor == 10 || spectrumColor == 11) && h > 1) {
+      const int segs = 8;
+      // ????? threshold: the hue sweep occupies only [0 .. gradRange%] of
+      // the screen height (from the top); rows below the threshold are
+      // painted with the sweep's final hue.
+      int thrPx = SCREEN_H * spectrumGradRange / 100;
+      if (thrPx < 1) thrPx = 1;
+      for (int s = 0; s < segs; s++) {
+        int y0 = y + h * s / segs;
+        int y1 = y + h * (s + 1) / segs;
+        if (y1 <= y0) continue;
+        int v;
+        if (spectrumColor == 11) {
+          // ?????: SCREEN-ANCHORED fixed gradient. Inside the threshold the
+          // hue depends only on the pixel row (identical for every bar);
+          // beyond it the final hue is used. gradReverse flips the sweep.
+          if (y0 < thrPx) {
+            int ratio = y0 * 255 / thrPx; // 0 (top) .. 255 (threshold)
+            v = spectrumGradReverse ? ratio : 255 - ratio;
+          } else {
+            v = spectrumGradReverse ? 255 : 0; // past threshold: final hue
+          }
+        } else {
+          // ???????: bar-anchored gradient (bottom ?? top inside the bar)
+          v = s * 255 / (segs - 1);
+          if (spectrumGradReverse) v = 255 - v;
+        }
+        tft.fillRect(x, y0, w, y1 - y0, spectrumRainbowColor(v));
+      }
+    } else {
+      tft.fillRect(x, y, w, h, colFor(i));
+    }
+  };
+
+  // secondary color (?????): 0-7 solid palette, 8 = ??????? (index sweep),
+  // 9+ = magnitude sweep (????? / ??????? / ????? all use the live
+  // range here since a single color per bar is needed).
+  auto col2For = [&](int i) -> uint16_t {
+    if (spectrumColor2 == 8) {
+      int v = (i * 255) / (n > 1 ? n - 1 : 1);
+      return spectrumRainbowColor(v);
+    }
+    if (spectrumColor2 >= 9) {
+      float span = spectrumRainbowMax - spectrumRainbowMin;
+      if (span <= 0) span = 1;
+      int v = (int)((spectrumBars[i] - spectrumRainbowMin) * 255.0f / span);
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      return spectrumRainbowColor(v);
+    }
+    return paletteColor(spectrumColor2);
+  };
+
+  // fill color (????): same rainbow modes as the primary color ?? 0-7 solid
+  // palette, 8 = ??????? (index sweep), 9+ = magnitude sweep over the live
+  // adaptive range (????? / ??????? / ????? collapse to per-bar colors).
+  auto fillColorFor = [&](int i) -> uint16_t {
+    if (spectrumFillColor == 8) {
+      int v = (i * 255) / (n > 1 ? n - 1 : 1);
+      return spectrumRainbowColor(v);
+    }
+    if (spectrumFillColor >= 9) {
+      float span = spectrumRainbowMax - spectrumRainbowMin;
+      if (span <= 0) span = 1;
+      int v = (int)((spectrumBars[i] - spectrumRainbowMin) * 255.0f / span);
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      return spectrumRainbowColor(v);
+    }
+    return paletteColor(spectrumFillColor);
+  };
+
+  // ???????/????? for wave & radial types: color from a screen row y
+  // (vertical sweep), so lines and radial bars show the gradient too.
+  auto gradRow = [&](int y) -> uint16_t {
+    if (spectrumColor == 10) { // ???????: full 0..255 sweep over the height
+      int v = (SCREEN_H - 1 - y) * 255 / (SCREEN_H - 1);
+      if (spectrumGradReverse) v = 255 - v;
+      return spectrumRainbowColor(v);
+    }
+    if (spectrumColor == 11) { // ?????: SCREEN-ANCHORED, same as the bars
+      // (identical direction & past-threshold hue as fillBar's ?????)
+      int thrPx = SCREEN_H * spectrumGradRange / 100;
+      if (thrPx < 1) thrPx = 1;
+      int v;
+      if (y < thrPx) {
+        int ratio = y * 255 / thrPx; // 0 (top) .. 255 (threshold)
+        v = spectrumGradReverse ? ratio : 255 - ratio;
+      } else {
+        v = spectrumGradReverse ? 255 : 0; // past threshold: final hue
+      }
+      return spectrumRainbowColor(v);
+    }
+    return colFor(0);
+  };
+  // radial version: color from a radius (inner ?? outer sweep)
+  auto gradRad = [&](int r) -> uint16_t {
+    int span = max(8, spectrumRingOuter - spectrumRingInner);
+    int v = (r - spectrumRingInner) * 255 / span;
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    if (spectrumGradReverse) v = 255 - v;
+    return spectrumRainbowColor(v);
+  };
+  // wave lines: vertical-gradient color when color is 10/11, else per-bar
+  auto waveCol = [&](int i, int y) -> uint16_t {
+    if (spectrumColor == 10 || spectrumColor == 11) return gradRow(y);
+    return colFor(i);
+  };
+  // radial bars: radius-gradient color when color is 10/11, else per-bar
+  auto radCol = [&](int i, int r) -> uint16_t {
+    if (spectrumColor == 10 || spectrumColor == 11) return gradRad(r);
+    return colFor(i);
+  };
+
+  // vertical mirror for bars: with spectrumMirror ON the bar grows
+  // symmetrically from the horizontal center line ?? the center line is the
+  // spectrum's 0 point, so the bar extends +h/2 up and -h/2 down (oscilloscope
+  // style). With it OFF the bar grows up from the bottom as usual.
+  auto barM = [&](int i, int x, int w, int h) {
+    int prevH = prevSpectrumH[i];
+    if (prevH != h) {
+      int e = max(prevH, h);
+      if (spectrumMirror) {
+        int midY = SCREEN_H / 2;
+        int e2 = (e + 1) / 2, h2 = (h + 1) / 2;
+        tft.fillRect(x, midY - e2, w, e2 * 2, TFT_BLACK); // erase both halves
+        fillBar(i, x, midY - h2, w, h2 * 2);              // centered on the axis
+      } else {
+        tft.fillRect(x, SCREEN_H - e, w, e, TFT_BLACK);   // erase bottom
+        fillBar(i, x, SCREEN_H - h, w, h);                // bottom bar
+      }
+      prevSpectrumH[i] = h;
+    }
+  };
+
+  // Style changed ?? full repaint from scratch. Include fill & mirror in the
+  // key: switching either changes the drawing form (line?fill, bottom?axis),
+  // and incremental erasing alone would leave ghost pixels of the old form.
+  int styleKey = spectrumType * 1000 + spectrumEffect * 100 + spectrumFill * 10 + spectrumMirror;
+  if (spectrumFirstDraw || styleKey != lastSpectrumStyleDrawn) {
+    tft.fillScreen(TFT_BLACK);
+    spectrumFirstDraw = false;
+    lastSpectrumStyleDrawn = styleKey;
+    memset(prevSpectrumH, 0, sizeof(prevSpectrumH));
+    memset(prevWaveY, 0, sizeof(prevWaveY));
+    memset(prevWaveY2, 0, sizeof(prevWaveY2));
+    memset(prevPeakY, 0, sizeof(prevPeakY));
+    memset(prevRadialR, 0, sizeof(prevRadialR));
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 1) {
+    // mirrored: left half grows rightward from center, right half leftward.
+    // Incremental: erase the previous bars (up to their old height), then
+    // draw the new ones ?? never clear the whole panel.
+    int col = SCREEN_CX - 1;              // center column (64)
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        int left = min(x, col), right = max(x + bw, col);
+        tft.fillRect(left, SCREEN_H - prevH, right - left, prevH, TFT_BLACK);
+        if (x < col) {
+          fillBar(i, x, SCREEN_H - h, col - x, h);
+        } else {
+          fillBar(i, col, SCREEN_H - h, x + bw - col, h);
+        }
+        prevSpectrumH[i] = h;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 1 && spectrumEffect == 0) {
+    // waveform: polyline through bar tops. Incremental: erase the previous
+    // segments (3px-thick black line covers the old 1px line even when the
+    // slope shifts) then draw the new ones ?? no full-panel repaint, so the
+    // moving wave doesn't flicker. With spectrumMirror the CENTER LINE is the
+    // spectrum's 0 point: the wave grows upward (+h) and its mirror downward
+    // (-h), oscilloscope style; the axis itself is not drawn.
+    int midY = SCREEN_H / 2;
+    auto wy = [&](int i) -> int {
+      return spectrumMirror
+               ? midY - map(barV(i), 0, 255, 2, midY - 2)
+               : SCREEN_H - map(barV(i), 0, 255, 2, maxH);
+    };
+    if (spectrumFill) {
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int y1 = wy(i), y2 = wy(i + 1);
+        int yTop = min(y1, y2);
+        tft.fillRect(x1, 0, x2 - x1, SCREEN_H, TFT_BLACK); // clear column
+        if (spectrumMirror) {
+          // fill from the axis upward (positive) and downward (mirror)
+          tft.fillRect(x1, yTop, x2 - x1, midY - yTop, fillColorFor(i));
+          tft.fillRect(x1, midY, x2 - x1, midY - yTop, fillColorFor(i));
+        } else {
+          tft.fillRect(x1, yTop, x2 - x1, SCREEN_H - yTop, fillColorFor(i));
+        }
+      }
+    } else {
+      // erase old wave segments (thicker black line guarantees full coverage)
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int p1 = prevWaveY[i], p2 = prevWaveY[i + 1];
+        tft.drawLine(x1, p1 - 1, x2, p2 - 1, TFT_BLACK);
+        tft.drawLine(x1, p1, x2, p2, TFT_BLACK);
+        tft.drawLine(x1, p1 + 1, x2, p2 + 1, TFT_BLACK);
+        if (spectrumMirror) {
+          int m1 = 2 * midY - p1, m2 = 2 * midY - p2;
+          tft.drawLine(x1, m1 - 1, x2, m2 - 1, TFT_BLACK);
+          tft.drawLine(x1, m1, x2, m2, TFT_BLACK);
+          tft.drawLine(x1, m1 + 1, x2, m2 + 1, TFT_BLACK);
+        }
+      }
+    }
+    // draw the new wave (and its downward mirror when enabled)
+    for (int i = 0; i < n - 1; i++) {
+      int x1 = 2 + i * bw;
+      int x2 = 2 + (i + 1) * bw;
+      int y1 = wy(i), y2 = wy(i + 1);
+      for (int t = 0; t < spectrumLineW; t++) {
+        tft.drawLine(x1, y1 + t, x2, y2 + t, waveCol(i, y1)); // rainbow-aware
+        if (spectrumMirror) {
+          tft.drawLine(x1, 2 * midY - y1 - t, x2, 2 * midY - y2 - t, waveCol(i, 2 * midY - y1));
+        }
+      }
+      prevWaveY[i] = y1;
+      prevWaveY[i + 1] = y2;
+    }
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 2) {
+    // peak-hold: bars + decaying peak dots; erase old bar+dot, draw new.
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      // decay speed: spectrumDecay 1..10 (higher = falls faster)
+      if (spectrumBars[i] > spectrumPeaks[i]) spectrumPeaks[i] = spectrumBars[i];
+      else spectrumPeaks[i] = (spectrumPeaks[i] * (11 - spectrumDecay)) / 10;
+      int px = 2 + i * bw + bw / 2;
+      int py = SCREEN_H - map(spectrumPeaks[i], 0, 255, 2, maxH);
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        tft.fillRect(x, SCREEN_H - max(prevH, h), effW, max(prevH, h), TFT_BLACK);
+        barM(i, x, effW, h);
+        prevSpectrumH[i] = h;
+      }
+      // peak dot only when spectrumPeak is enabled (style 3 = peak-hold)
+      if (spectrumPeak) {
+        tft.fillRect(px - 1, prevPeakY[i] - 1, 3, 3, TFT_BLACK);
+        tft.fillRect(px - 1, py - 1, 3, 3, TFT_YELLOW);
+        prevPeakY[i] = py;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 2 && spectrumEffect == 0) {
+    // radial: trapezoid slices. Incremental: erase old slice (black
+    // triangles from the previous outer radius) then draw the new one, so the
+    // rotating ring doesn't flicker. With spectrumDualRing each slice is
+    // drawn as an inner ring [ringInner, r1] plus an outer ring [r1, r2],
+    // like the dedicated ??? style.
+    int cx = SCREEN_CX, cy = SCREEN_CX;
+    float step = 360.0f / n;
+    float halfW = step * 0.35f * spectrumRingW / 2.0f;      // half angle (deg)
+    float gapDeg = spectrumRingGap * 0.4f;                   // inter-slice gap
+    int rSpan = max(8, spectrumRingOuter - spectrumRingInner);
+    for (int i = 0; i < n; i++) {
+      float a0 = (i * step + gapDeg) * 0.0174533f;
+      float a1 = (i * step + gapDeg + halfW * 2) * 0.0174533f;
+      int r1 = spectrumRingInner + map(barV(i), 0, 255, 4,
+                                       spectrumDualRing ? rSpan * spectrumDualInner / 100 : rSpan);
+      // dual-ring mirrors the dedicated ??? style: each slice becomes a
+      // spoke from r1 (inner tip) to r2 (outer tip), both following the
+      // magnitude. dualInner scales r1's sweep, dualOuter scales r2's reach.
+      int r2 = spectrumDualRing ? r1 + map(barV(i), 0, 255, 6, 24 * spectrumDualOuter / 100) : r1;
+      // keep the outer ring inside the panel (center 64 ?? max radius 63)
+      if (spectrumDualRing && r2 > SCREEN_CX - 1) r2 = SCREEN_CX - 1;
+      int outer = spectrumDualRing ? r2 : r1;
+      int rIn = spectrumDualRing ? r1 : spectrumRingInner;
+      int pr1 = spectrumRingInner + prevRadialR[i];      // old outer radius
+      int prIn = spectrumRingInner + prevRadialInner[i]; // old inner radius
+      int x0 = cx + (int)(cosf(a0) * spectrumRingInner);
+      int y0 = cy + (int)(sinf(a0) * spectrumRingInner);
+      int x1 = cx + (int)(cosf(a1) * spectrumRingInner);
+      int y1 = cy + (int)(sinf(a1) * spectrumRingInner);
+      // erase old slice: compare BOTH radii (dual-ring inner moves too) and
+      // widen the erase area by 2px so triangle edges leave no fringe.
+      if (pr1 != outer || prIn != rIn) {
+        int eIn = min(prIn, rIn) - 2;
+        int eOut = max(pr1, outer) + 2;
+        int px2 = cx + (int)(cosf(a1) * eOut);
+        int py2 = cy + (int)(sinf(a1) * eOut);
+        int px3 = cx + (int)(cosf(a0) * eOut);
+        int py3 = cy + (int)(sinf(a0) * eOut);
+        int qx0 = cx + (int)(cosf(a0) * eIn);
+        int qy0 = cy + (int)(sinf(a0) * eIn);
+        int qx1 = cx + (int)(cosf(a1) * eIn);
+        int qy1 = cy + (int)(sinf(a1) * eIn);
+        tft.fillTriangle(qx0, qy0, qx1, qy1, px2, py2, TFT_BLACK);
+        tft.fillTriangle(qx0, qy0, px2, py2, px3, py3, TFT_BLACK);
+      }
+      // draw slice: normal = [ringInner, r1]; dual-ring = spoke [r1, r2]
+      // (inner tip r1 and outer tip r2 both follow the magnitude, exactly
+      // like the dedicated ??? effect).
+      int xa = cx + (int)(cosf(a0) * rIn);
+      int ya = cy + (int)(sinf(a0) * rIn);
+      int xb = cx + (int)(cosf(a1) * rIn);
+      int yb = cy + (int)(sinf(a1) * rIn);
+      int xc = cx + (int)(cosf(a1) * outer);
+      int yc = cy + (int)(sinf(a1) * outer);
+      int xd = cx + (int)(cosf(a0) * outer);
+      int yd = cy + (int)(sinf(a0) * outer);
+      tft.fillTriangle(xa, ya, xb, yb, xc, yc, radCol(i, outer));
+      tft.fillTriangle(xa, ya, xc, yc, xd, yd, radCol(i, outer));
+      prevRadialR[i] = outer - spectrumRingInner;
+      prevRadialInner[i] = rIn - spectrumRingInner;
+    }
+    if (spectrumRingInColor != 9) // 9 = off: skip the inner ring
+      tft.drawCircle(cx, cy, spectrumRingInner,
+                     spectrumRingInColor == 8 ? TFT_BLACK : paletteColor(spectrumRingInColor));
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 3) {
+    // twin: two thin bars per slot (main + half-height companion)
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int h2 = barH(i) / 2;
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        int eraseH = max(prevH, h);
+        tft.fillRect(x, SCREEN_H - eraseH, effW * 2, eraseH, TFT_BLACK);
+        barM(i, x, effW, h);
+        tft.fillRect(x + effW + 1, SCREEN_H - h2, effW, h2, TFT_DARKGREY);
+        prevSpectrumH[i] = h;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 4) {
+    // dotted: bar height shown as a column of 2x2 dots. With spectrumMirror
+    // the dot columns grow symmetrically from the center line (0 point).
+    int midY = SCREEN_H / 2;
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int x = 2 + i * bw + 1;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        if (spectrumMirror) {
+          int h2 = (h + 1) / 2;
+          int e2 = max(prevH, h) / 2 + 3;
+          tft.fillRect(x, midY - e2, effW, e2 * 2, TFT_BLACK); // erase both halves
+          for (int y = midY - 2; y > midY - h2; y -= 4) fillBar(i, x, y - 2, effW, 2);
+          for (int y = midY + 2; y < midY + h2; y += 4) fillBar(i, x, y - 2, effW, 2);
+        } else {
+          int eraseH = max(prevH, h) + 3;
+          tft.fillRect(x, SCREEN_H - eraseH, effW, eraseH, TFT_BLACK);
+          for (int y = SCREEN_H - 2; y > SCREEN_H - h; y -= 4) {
+            fillBar(i, x, y - 2, effW, 2);
+          }
+        }
+        prevSpectrumH[i] = h;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 5) {
+    // glow: bar with a bright 2px cap and darker body. With spectrumMirror
+    // the bar grows symmetrically from the center line (0 point).
+    int midY = SCREEN_H / 2;
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        if (spectrumMirror) {
+          int h2 = (h + 1) / 2;
+          int e2 = max(prevH, h) / 2 + 3;
+          tft.fillRect(x, midY - e2, effW, e2 * 2, TFT_BLACK); // erase both halves
+          tft.fillRect(x, midY - h2, effW, h2 * 2 - 2, TFT_DARKGREY);
+          fillBar(i, x, midY - h2, effW, 2);        // top cap
+          fillBar(i, x, midY + h2 - 2, effW, 2);    // bottom cap (mirror)
+        } else {
+          int eraseH = max(prevH, h) + 3;
+          tft.fillRect(x, SCREEN_H - eraseH, effW, eraseH, TFT_BLACK);
+          tft.fillRect(x, SCREEN_H - h, effW, h - 2, TFT_DARKGREY);
+          fillBar(i, x, SCREEN_H - h, effW, 2);
+        }
+        prevSpectrumH[i] = h;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 1 && spectrumEffect == 1) {
+    // mirror-wave: two mirrored polylines around the vertical center.
+    // Incremental: erase old segments (thick black line) then draw new ones.
+    int midY = SCREEN_H / 2;
+    if (spectrumFill) {
+      // fill toward the center line: clear each column, then repaint fill
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int y1 = midY - map(barV(i), 0, 255, 2, midY - 6);
+        int y2 = midY - map(barV(i + 1), 0, 255, 2, midY - 6);
+        int yTop = min(y1, y2);
+        tft.fillRect(x1, 0, x2 - x1, SCREEN_H, TFT_BLACK); // clear column
+        tft.fillRect(x1, yTop, x2 - x1, midY - yTop, fillColorFor(i));
+        tft.fillRect(x1, midY, x2 - x1, midY - yTop, fillColorFor(i));
+      }
+    } else {
+      // erase old mirrored segments
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int p1 = prevWaveY[i], p2 = prevWaveY[i + 1];
+        tft.drawLine(x1, p1 - 1, x2, p2 - 1, TFT_BLACK);
+        tft.drawLine(x1, p1, x2, p2, TFT_BLACK);
+        tft.drawLine(x1, p1 + 1, x2, p2 + 1, TFT_BLACK);
+        tft.drawLine(x1, 2 * midY - p1 - 1, x2, 2 * midY - p2 - 1, TFT_BLACK);
+        tft.drawLine(x1, 2 * midY - p1, x2, 2 * midY - p2, TFT_BLACK);
+        tft.drawLine(x1, 2 * midY - p1 + 1, x2, 2 * midY - p2 + 1, TFT_BLACK);
+      }
+    }
+    // draw the new mirrored wave
+    for (int i = 0; i < n - 1; i++) {
+      int x1 = 2 + i * bw;
+      int x2 = 2 + (i + 1) * bw;
+      int y1 = midY - map(barV(i), 0, 255, 2, midY - 6);
+      int y2 = midY - map(barV(i + 1), 0, 255, 2, midY - 6);
+      for (int t = 0; t < spectrumLineW; t++) {
+        tft.drawLine(x1, y1 + t, x2, y2 + t, waveCol(i, y1));       // rainbow-aware
+        tft.drawLine(x1, 2 * midY - y1 - t, x2, 2 * midY - y2 - t, waveCol(i, 2 * midY - y1));
+      }
+      prevWaveY[i] = y1;
+      prevWaveY[i + 1] = y2;
+    }
+    tft.drawLine(2, midY, 2 + (n - 1) * bw, midY, TFT_DARKGREY);
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 6) {
+    // fire: three-tier gradient bar (red bottom, orange mid, yellow top)
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        int eraseH = max(prevH, h);
+        tft.fillRect(x, SCREEN_H - eraseH, effW, eraseH, TFT_BLACK);
+        int red = h * 2 / 3, orange = h / 3;
+        tft.fillRect(x, SCREEN_H - red, effW, red, TFT_RED);
+        tft.fillRect(x, SCREEN_H - red, effW, orange, TFT_ORANGE);
+        tft.fillRect(x, SCREEN_H - h, effW, h - red, TFT_YELLOW);
+        prevSpectrumH[i] = h;
+      }
+    }
+    return;
+  }
+
+  if (spectrumType == 1 && spectrumEffect == 2) {
+    // aurora: a bright polyline plus a dimmer echo above it.
+    // Incremental: erase old segments then draw new ones. With spectrumMirror
+    // the center line is the 0 point: aurora grows up and mirrors down.
+    int midY = SCREEN_H / 2;
+    auto wy = [&](int i) -> int {
+      return spectrumMirror
+               ? midY - map(barV(i), 0, 255, 2, midY - 2)
+               : SCREEN_H - map(barV(i), 0, 255, 2, maxH);
+    };
+    if (spectrumFill) {
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int y1 = wy(i), y2 = wy(i + 1);
+        int yTop = min(y1, y2);
+        tft.fillRect(x1, 0, x2 - x1, SCREEN_H, TFT_BLACK); // clear column
+        if (spectrumMirror) {
+          tft.fillRect(x1, yTop, x2 - x1, midY - yTop, fillColorFor(i));
+          tft.fillRect(x1, midY, x2 - x1, midY - yTop, fillColorFor(i));
+        } else {
+          tft.fillRect(x1, yTop, x2 - x1, SCREEN_H - yTop, fillColorFor(i));
+        }
+      }
+    } else {
+      // erase old main + echo segments (and their mirrors)
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int p1 = prevWaveY[i], p2 = prevWaveY[i + 1];
+        tft.drawLine(x1, p1 - 7, x2, p2 - 7, TFT_BLACK);   // echo
+        tft.drawLine(x1, p1 - 6, x2, p2 - 6, TFT_BLACK);
+        tft.drawLine(x1, p1 - 5, x2, p2 - 5, TFT_BLACK);
+        tft.drawLine(x1, p1 - 1, x2, p2 - 1, TFT_BLACK);
+        tft.drawLine(x1, p1, x2, p2, TFT_BLACK);
+        tft.drawLine(x1, p1 + 1, x2, p2 + 1, TFT_BLACK);
+        if (spectrumMirror) {
+          int m1 = 2 * midY - p1, m2 = 2 * midY - p2;
+          tft.drawLine(x1, m1 - 7, x2, m2 - 7, TFT_BLACK); // mirror echo
+          tft.drawLine(x1, m1 - 6, x2, m2 - 6, TFT_BLACK);
+          tft.drawLine(x1, m1 - 5, x2, m2 - 5, TFT_BLACK);
+          tft.drawLine(x1, m1 - 1, x2, m2 - 1, TFT_BLACK);
+          tft.drawLine(x1, m1, x2, m2, TFT_BLACK);
+          tft.drawLine(x1, m1 + 1, x2, m2 + 1, TFT_BLACK);
+        }
+      }
+    }
+    // draw the new aurora (and its downward mirror)
+    for (int i = 0; i < n - 1; i++) {
+      int x1 = 2 + i * bw;
+      int x2 = 2 + (i + 1) * bw;
+      int y1 = wy(i), y2 = wy(i + 1);
+      tft.drawLine(x1, y1 - 6, x2, y2 - 6, TFT_DARKGREY);   // echo
+      for (int t = 0; t < spectrumLineW; t++) {
+        tft.drawLine(x1, y1 + t, x2, y2 + t, waveCol(i, y1));      // main, rainbow-aware
+      }
+      if (spectrumMirror) {
+        int m1 = 2 * midY - y1, m2 = 2 * midY - y2;
+        tft.drawLine(x1, m1 - 6, x2, m2 - 6, TFT_DARKGREY); // mirror echo
+        for (int t = 0; t < spectrumLineW; t++) {
+          tft.drawLine(x1, m1 + t, x2, m2 + t, waveCol(i, m1)); // mirror main
+        }
+      }
+      prevWaveY[i] = y1;
+      prevWaveY[i + 1] = y2;
+    }
+    return;
+  }
+
+  if (spectrumType == 0 && spectrumEffect == 8) {
+    // starry (bars type): dotted bars with a random bright twinkle. With
+    // spectrumMirror the dot columns grow symmetrically from the center line.
+    int midY = SCREEN_H / 2;
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      int x = 2 + i * bw + 1;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        if (spectrumMirror) {
+          int h2 = (h + 1) / 2;
+          int e2 = max(prevH, h) / 2 + 3;
+          tft.fillRect(x, midY - e2, effW, e2 * 2, TFT_BLACK); // erase both halves
+          for (int y = midY - 2; y > midY - h2; y -= 4) fillBar(i, x, y - 2, effW, 2);
+          for (int y = midY + 2; y < midY + h2; y += 4) fillBar(i, x, y - 2, effW, 2);
+        } else {
+          int eraseH = max(prevH, h) + 3;
+          tft.fillRect(x, SCREEN_H - eraseH, effW, eraseH, TFT_BLACK);
+          for (int y = SCREEN_H - 2; y > SCREEN_H - h; y -= 4) {
+            fillBar(i, x, y - 2, effW, 2);
+          }
+        }
+        prevSpectrumH[i] = h;
+      }
+      // twinkle: occasionally light pixels just beyond both bar tips
+      if (random(100) < 30 && h > 6) {
+        tft.drawPixel(x + effW / 2, (spectrumMirror ? midY - h / 2 : SCREEN_H) - h / 2 - 3, TFT_WHITE);
+        if (spectrumMirror)
+          tft.drawPixel(x + effW / 2, midY + h / 2 + 3, TFT_WHITE);
+      }
+    }
+    return;
+  }
+
+  // ---- combo styles (full repaint; wave parts would leave trails
+  // with incremental drawing) ----
+  if (spectrumType == 0 && spectrumEffect == 7) {
+    // bars+wave: classic bars (primary color) with a polyline (color2)
+    tft.fillScreen(TFT_BLACK);
+    for (int i = 0; i < n; i++) {
+      int h = barH(i);
+      barM(i, 2 + i * bw, effW, h);
+    }
+    for (int i = 0; i < n - 1; i++) {
+      int x1 = 2 + i * bw;
+      int x2 = 2 + (i + 1) * bw;
+      int y1 = SCREEN_H - map(barV(i), 0, 255, 2, maxH);
+      int y2 = SCREEN_H - map(barV(i + 1), 0, 255, 2, maxH);
+      tft.drawLine(x1, y1, x2, y2, col2For(i)); // rainbow-aware secondary
+    }
+    return;
+  }
+
+  if (spectrumType == 1 && spectrumEffect == 3) {
+    // wave+bars: half-height bars (color2) under a bright wave (primary).
+    // Incremental: erase old bars + wave segments, then draw new ones. With
+    // spectrumMirror the CENTER LINE is the 0 point: bars/wave grow up (+h)
+    // and mirror down (-h), oscilloscope style.
+    int midY = SCREEN_H / 2;
+    auto wy = [&](int i) -> int {
+      return spectrumMirror
+               ? midY - map(barV(i), 0, 255, 2, midY - 2)
+               : SCREEN_H - map(barV(i), 0, 255, 2, maxH);
+    };
+    if (spectrumFill) {
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int y1 = wy(i), y2 = wy(i + 1);
+        int yTop = min(y1, y2);
+        tft.fillRect(x1, 0, x2 - x1, SCREEN_H, TFT_BLACK); // clear column
+        if (spectrumMirror) {
+          tft.fillRect(x1, yTop, x2 - x1, midY - yTop, fillColorFor(i));
+          tft.fillRect(x1, midY, x2 - x1, midY - yTop, fillColorFor(i));
+        } else {
+          tft.fillRect(x1, yTop, x2 - x1, SCREEN_H - yTop, fillColorFor(i));
+        }
+      }
+    } else {
+      // erase old wave segments (and mirrors)
+      for (int i = 0; i < n - 1; i++) {
+        int x1 = 2 + i * bw;
+        int x2 = 2 + (i + 1) * bw;
+        int p1 = prevWaveY[i], p2 = prevWaveY[i + 1];
+        tft.drawLine(x1, p1 - 1, x2, p2 - 1, TFT_BLACK);
+        tft.drawLine(x1, p1, x2, p2, TFT_BLACK);
+        tft.drawLine(x1, p1 + 1, x2, p2 + 1, TFT_BLACK);
+        if (spectrumMirror) {
+          int m1 = 2 * midY - p1, m2 = 2 * midY - p2;
+          tft.drawLine(x1, m1 - 1, x2, m2 - 1, TFT_BLACK);
+          tft.drawLine(x1, m1, x2, m2, TFT_BLACK);
+          tft.drawLine(x1, m1 + 1, x2, m2 + 1, TFT_BLACK);
+        }
+      }
+    }
+    // half-height bars: erase old bar, draw new (centered on axis when mirror)
+    for (int i = 0; i < n; i++) {
+      int h = barH(i) / 2;
+      int x = 2 + i * bw;
+      int prevH = prevSpectrumH[i];
+      if (prevH != h) {
+        int e = max(prevH, h);
+        if (spectrumMirror) {
+          int e2 = (e + 1) / 2, h2 = (h + 1) / 2;
+          tft.fillRect(x, midY - e2, effW, e2 * 2, TFT_BLACK);
+          tft.fillRect(x, midY - h2, effW, h2 * 2, col2For(i)); // rainbow-aware
+        } else {
+          tft.fillRect(x, SCREEN_H - e, effW, e, TFT_BLACK);
+          tft.fillRect(x, SCREEN_H - h, effW, h, col2For(i)); // rainbow-aware
+        }
+        prevSpectrumH[i] = h;
+      }
+    }
+    // draw the new wave (and its downward mirror)
+    for (int i = 0; i < n - 1; i++) {
+      int x1 = 2 + i * bw;
+      int x2 = 2 + (i + 1) * bw;
+      int y1 = wy(i), y2 = wy(i + 1);
+      for (int t = 0; t < spectrumLineW; t++) {
+        tft.drawLine(x1, y1 + t, x2, y2 + t, waveCol(i, y1)); // rainbow-aware
+        if (spectrumMirror) {
+          tft.drawLine(x1, 2 * midY - y1 - t, x2, 2 * midY - y2 - t, waveCol(i, 2 * midY - y1));
+        }
+      }
+      prevWaveY[i] = y1;
+      prevWaveY[i + 1] = y2;
+    }
+    return;
+  }
+
+  if (spectrumType == 2 && spectrumEffect == 1) {
+    // double-ring radial: two concentric radiating rings. Incremental:
+    // erase the old spoke, then draw the new one.
+    int cx = SCREEN_CX, cy = SCREEN_CX;
+    int rSpan = max(8, spectrumRingOuter - spectrumRingInner);
+    for (int i = 0; i < n; i++) {
+      float ang = (i * 360.0f / n) * 0.0174533f;
+      int r1 = spectrumRingInner + map(barV(i), 0, 255, 4, rSpan);
+      int r2 = r1 + map(barV(i), 0, 255, 6, 24);
+      int x0 = cx + (int)(cosf(ang) * r1);
+      int y0 = cy + (int)(sinf(ang) * r1);
+      int x1 = cx + (int)(cosf(ang) * r2);
+      int y1 = cy + (int)(sinf(ang) * r2);
+      int pr1 = spectrumRingInner + prevRadialR[i];
+      if (pr1 != r1) {
+        int px1 = cx + (int)(cosf(ang) * pr1);
+        int py1 = cy + (int)(sinf(ang) * pr1);
+        tft.drawLine(x0, y0, px1, py1, TFT_BLACK); // erase old spoke
+      }
+      tft.drawLine(x0, y0, x1, y1, radCol(i, r2));
+      prevRadialR[i] = r1 - spectrumRingInner;
+    }
+    if (spectrumRingInColor != 9) // 9 = off: skip the inner ring
+      tft.drawCircle(cx, cy, spectrumRingInner,
+                     spectrumRingInColor == 8 ? TFT_BLACK : paletteColor(spectrumRingInColor));
+    return;
+  }
+
+  if (spectrumType == 2 && spectrumEffect == 2) {
+    // ring polyline: bar tips connected into a closed, wavy continuous line,
+    // with the band between the inner circle and the line filled. Incremental:
+    // erase old segments (thick black line), then draw new ones.
+    int cx = SCREEN_CX, cy = SCREEN_CX;
+    int rIn = spectrumRingInner;
+    int rSpan = max(8, spectrumRingOuter - spectrumRingInner);
+    int px[n], py[n];
+    for (int i = 0; i < n; i++) {
+      float ang = (i * 360.0f / n) * 0.0174533f;
+      int r = rIn + map(barV(i), 0, 255, 4, rSpan);
+      px[i] = cx + (int)(cosf(ang) * r);
+      py[i] = cy + (int)(sinf(ang) * r);
+    }
+    // erase old wavy ring (thick black line covers the old segments)
+    for (int i = 0; i < n; i++) {
+      int j = (i + 1) % n;
+      int pr1 = rIn + prevRadialR[i];
+      int pr2 = rIn + prevRadialR[j];
+      int qx1 = cx + (int)(cosf((i * 360.0f / n) * 0.0174533f) * pr1);
+      int qy1 = cy + (int)(sinf((i * 360.0f / n) * 0.0174533f) * pr1);
+      int qx2 = cx + (int)(cosf((j * 360.0f / n) * 0.0174533f) * pr2);
+      int qy2 = cy + (int)(sinf((j * 360.0f / n) * 0.0174533f) * pr2);
+      tft.drawLine(qx1 - 1, qy1, qx2 - 1, qy2, TFT_BLACK);
+      tft.drawLine(qx1, qy1, qx2, qy2, TFT_BLACK);
+      tft.drawLine(qx1 + 1, qy1, qx2 + 1, qy2, TFT_BLACK);
+    }
+    // filled ribbon: triangle per segment from the inner circle to the line
+    if (spectrumRingFill) {
+      for (int i = 0; i < n; i++) {
+        int j = (i + 1) % n;
+        float ang = (i * 360.0f / n) * 0.0174533f;
+        int ix = cx + (int)(cosf(ang) * rIn);
+        int iy = cy + (int)(sinf(ang) * rIn);
+        tft.fillTriangle(ix, iy, px[i], py[i], px[j], py[j], fillColorFor(i));
+      }
+    }
+    // the wavy closed line itself
+    for (int t = 0; t < spectrumRingW; t++) {
+      for (int i = 0; i < n; i++) {
+        int j = (i + 1) % n;
+        tft.drawLine(px[i], py[i], px[j], py[j], waveCol(i, py[i]));
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      float ang = (i * 360.0f / n) * 0.0174533f;
+      int r = rIn + map(barV(i), 0, 255, 4, rSpan);
+      prevRadialR[i] = r - rIn;
+    }
+    if (spectrumRingInColor != 9) // 9 = off: skip the inner ring
+      tft.drawCircle(cx, cy, rIn,
+                     spectrumRingInColor == 8 ? TFT_BLACK : paletteColor(spectrumRingInColor));
+    return;
+  }
+
+  if (spectrumType == 2 && spectrumEffect == 3) {
+    // fan: each spectrum line becomes a small pie slice from the inner to
+    // the outer radius (quad approximated by two triangles). Incremental:
+    // erase the old slice (black triangles), then draw the new one. With
+    // spectrumDualRing each slice is inner [rIn, r1] + outer [r1, r2].
+    int cx = SCREEN_CX, cy = SCREEN_CX;
+    int rIn = spectrumRingInner;
+    int rSpan = max(8, spectrumRingOuter - spectrumRingInner);
+    float step = 360.0f / n;
+    for (int i = 0; i < n; i++) {
+      float a0 = (i * step) * 0.0174533f;
+      float a1 = ((i + 1) * step) * 0.0174533f;
+      int r = rIn + map(barV(i), 0, 255, 4,
+                        spectrumDualRing ? rSpan * spectrumDualInner / 100 : rSpan);
+      // dual-ring mirrors the dedicated ??? style: each slice becomes a
+      // spoke from r (inner tip) to r2 (outer tip), both following the
+      // magnitude. dualInner scales r's sweep, dualOuter scales r2's reach.
+      int r2 = spectrumDualRing ? r + map(barV(i), 0, 255, 6, 24 * spectrumDualOuter / 100) : r;
+      // keep the outer ring inside the panel (center 64 ?? max radius 63)
+      if (spectrumDualRing && r2 > SCREEN_CX - 1) r2 = SCREEN_CX - 1;
+      int outer = spectrumDualRing ? r2 : r;
+      int rIn2 = spectrumDualRing ? r : rIn;
+      int pr = rIn + prevRadialR[i];      // old outer radius
+      int prIn = rIn + prevRadialInner[i]; // old inner radius
+      int x0 = cx + (int)(cosf(a0) * rIn);
+      int y0 = cy + (int)(sinf(a0) * rIn);
+      int x1 = cx + (int)(cosf(a1) * rIn);
+      int y1 = cy + (int)(sinf(a1) * rIn);
+      // erase old slice: compare BOTH radii (dual-ring inner moves too) and
+      // widen the erase area by 2px so triangle edges leave no fringe.
+      if (pr != outer || prIn != rIn2) {
+        int eIn = min(prIn, rIn2) - 2;
+        int eOut = max(pr, outer) + 2;
+        int px2 = cx + (int)(cosf(a1) * eOut);
+        int py2 = cy + (int)(sinf(a1) * eOut);
+        int px3 = cx + (int)(cosf(a0) * eOut);
+        int py3 = cy + (int)(sinf(a0) * eOut);
+        int qx0 = cx + (int)(cosf(a0) * eIn);
+        int qy0 = cy + (int)(sinf(a0) * eIn);
+        int qx1 = cx + (int)(cosf(a1) * eIn);
+        int qy1 = cy + (int)(sinf(a1) * eIn);
+        tft.fillTriangle(qx0, qy0, qx1, qy1, px2, py2, TFT_BLACK);
+        tft.fillTriangle(qx0, qy0, px2, py2, px3, py3, TFT_BLACK);
+      }
+      // draw slice: normal = [rIn, r]; dual-ring = spoke [r, r2]
+      // (inner tip r and outer tip r2 both follow the magnitude, exactly
+      // like the dedicated ??? effect).
+      int xa = cx + (int)(cosf(a0) * rIn2);
+      int ya = cy + (int)(sinf(a0) * rIn2);
+      int xb = cx + (int)(cosf(a1) * rIn2);
+      int yb = cy + (int)(sinf(a1) * rIn2);
+      int xc = cx + (int)(cosf(a1) * outer);
+      int yc = cy + (int)(sinf(a1) * outer);
+      int xd = cx + (int)(cosf(a0) * outer);
+      int yd = cy + (int)(sinf(a0) * outer);
+      tft.fillTriangle(xa, ya, xb, yb, xc, yc, radCol(i, outer));
+      tft.fillTriangle(xa, ya, xc, yc, xd, yd, radCol(i, outer));
+      prevRadialR[i] = outer - rIn;
+      prevRadialInner[i] = rIn2 - rIn;
+    }
+    if (spectrumRingInColor != 9) // 9 = off: skip the inner ring
+      tft.drawCircle(cx, cy, rIn,
+                     spectrumRingInColor == 8 ? TFT_BLACK : paletteColor(spectrumRingInColor));
+    return;
+  }
+
+  // style 0 (default): classic bottom-up bars; erase old, draw new.
+  for (int i = 0; i < n; i++) {
+    int h = barH(i);
+    int x = 2 + i * bw;
+    int prevH = prevSpectrumH[i];
+    if (prevH != h) {
+      tft.fillRect(x, SCREEN_H - max(prevH, h), effW, max(prevH, h), TFT_BLACK);
+      barM(i, x, effW, h);
+      prevSpectrumH[i] = h;
+    }
+  }
+}
+
 void pollMusic() {
   if (WiFi.status() != WL_CONNECTED || bridgeHost.length() == 0) return;
   WiFiClient client;
@@ -1415,6 +2652,102 @@ void pollMusic() {
       bool textChanged = tRev != musicTextRev;
       musicTextRev = tRev;
       drawMusicScreen(coverChanged, textChanged);
+    }
+  }
+  http.end();
+}
+
+// ---------- music spectrum ----------
+// Poll the bridge's live spectrum (24 magnitudes, JSON) and repaint the
+// current style. Runs only while MODE_SPECTRUM is showing.
+void pollSpectrum() {
+  if (WiFi.status() != WL_CONNECTED || bridgeHost.length() == 0) return;
+  WiFiClient client;
+  HTTPClient http;
+  String url = "http://" + bridgeHost + "/music/spectrum";
+  http.setTimeout(BRIDGE_HTTP_TIMEOUT_MS);
+  if (!http.begin(client, url)) return;
+  int code = http.GET();
+  if (code == HTTP_CODE_OK) {
+    JsonDocument doc;
+    if (!deserializeJson(doc, http.getString())) {
+      JsonArray bars = doc["bars"];
+      if (bars.size() > 0) {
+        // time smoothing: spectrumSmooth 0 = raw, 10 = very damped.
+        // Each frame blends toward the target; higher smooth = slower.
+        float alpha = 1.0f - spectrumSmooth * 0.09f;
+        for (int i = 0; i < SPECTRUM_BARS && i < (int)bars.size(); i++) {
+          float target = (float)constrain(bars[i].as<int>(), 0, 255);
+          spectrumSmoothed[i] = spectrumSmoothed[i] + (target - spectrumSmoothed[i]) * (1.0f - alpha);
+          spectrumBars[i] = (byte)spectrumSmoothed[i];
+        }
+        // adapt the rainbow range to the live magnitude envelope: the max
+        // decays slowly, the min rises slowly, so the color sweep always
+        // spans the current dynamic range even in long quiet sections.
+        float curMin = 255, curMax = 0;
+        for (int i = 0; i < SPECTRUM_BARS; i++) {
+          float v = spectrumSmoothed[i];
+          if (v < curMin) curMin = v;
+          if (v > curMax) curMax = v;
+        }
+        spectrumRainbowMax = max(curMax, spectrumRainbowMax * 0.985f);
+        spectrumRainbowMin = min(curMin, spectrumRainbowMin * 1.02f + 0.5f);
+        if (spectrumRainbowMax - spectrumRainbowMin < 20) {
+          spectrumRainbowMax = spectrumRainbowMin + 20; // keep a sane sweep
+        }
+        // silence gate: if the loudest bar is below the user threshold, treat
+        // the frame as silence and zero it (no phantom spectrum when quiet).
+        byte peakBar = 0;
+        for (int i = 0; i < SPECTRUM_BARS; i++) {
+          if (spectrumBars[i] > peakBar) peakBar = spectrumBars[i];
+        }
+        if (peakBar < spectrumSilence) {
+          memset(spectrumBars, 0, sizeof(spectrumBars));
+        }
+        spectrumData = true;
+        // static-frame guard: wave/radial repaint the whole panel every poll;
+        // repainting an identical frame flickers. Skip unless the bars moved,
+        // ANY drawing parameter changed, or this is the first frame.
+        int styleKey = spectrumType * 10 + spectrumEffect;
+        int paramKey = styleKey * 31
+                     + spectrumColor * 17
+                     + spectrumColor2 * 13
+                     + spectrumPeak * 11
+                     + spectrumSmooth
+                     + spectrumWidth * 7
+                     + spectrumGap * 5
+                     + spectrumDecay
+                     + spectrumLineW
+                     + spectrumFill * 3
+                     + spectrumFillColor * 2
+                     + spectrumRainbow * 19
+                     + spectrumRingW * 23
+                     + spectrumRingGap * 29
+                     + spectrumRingInner
+                     + spectrumRingOuter
+                     + spectrumRingInColor * 3
+                     + spectrumRingFill * 5
+                     + spectrumGradRange
+                     + spectrumGradReverse * 7
+                     + spectrumAutoRange * 11
+                     + spectrumOffset
+                     + spectrumSilence * 3
+                     + spectrumMirror * 13
+                     + spectrumDualRing * 17
+                     + spectrumDualInner * 19
+                     + spectrumDualOuter * 23;
+        bool changed = spectrumFirstDraw || paramKey != lastSpectrumParamKey;
+        if (!changed) {
+          for (int i = 0; i < SPECTRUM_BARS; i++) {
+            if (spectrumBars[i] != lastDrawnBars[i]) { changed = true; break; }
+          }
+        }
+        if (changed) {
+          lastSpectrumParamKey = paramKey;
+          drawSpectrum();
+          memcpy(lastDrawnBars, spectrumBars, sizeof(lastDrawnBars));
+        }
+      }
     }
   }
   http.end();
@@ -1528,18 +2861,29 @@ bool drawStockNames() {
     return false;
   }
   const size_t rowBytes = (size_t)STOCK_NAME_W * 2;
+  // Strip height isn't negotiated on the wire: derive it from Content-Length
+  // ([1B count][cnt x WxH RGB565 strips]) so an out-of-sync bridge version
+  // degrades to smaller names instead of garbage. No length -> STOCK_NAME_H.
+  int stripH = STOCK_NAME_H;
+  int len = http.getSize();
+  size_t perRow = cnt * rowBytes;
+  if (len > 1 && perRow > 0 && (size_t)(len - 1) % perRow == 0) {
+    int h = (int)((size_t)(len - 1) / perRow);
+    if (h >= 8 && h <= 32) stripH = h;
+  }
+  const int dispRows = min(stripH / 2, 12); // top line is 12px tall
   bool ok = true;
   // 2x downsample for the 128px panel: read a full 156px strip row, keep
-  // every other pixel (78px wide); display every other row (8px tall).
+  // every other pixel (78px wide); display every other row (dispRows tall).
   for (int i = 0; i < cnt && ok; i++) {
     int y0 = 4 + i * 26;
-    for (int r = 0; r < STOCK_NAME_H / 2; r++) {
+    for (int r = 0; r < stripH / 2; r++) {
       for (int skip = 0; skip < 2; skip++) {
         if (stream->readBytes((uint8_t *)rowBuf, rowBytes) != (int)rowBytes) {
           ok = false;
           break;
         }
-        if (skip == 0) {
+        if (skip == 0 && r < dispRows) {
           for (int c = 0; c < STOCK_NAME_W / 2; c++) rowBuf[c] = rowBuf[c * 2];
           if (i < stockCount) tft.pushImage(48, y0 + r, STOCK_NAME_W / 2, 1, rowBuf);
         }
@@ -1609,7 +2953,9 @@ void drawStockScreen() {
       if (has) {
         tft.setTextDatum(TL_DATUM);
         tft.setTextColor(0x7BEF, TFT_BLACK);
-        tft.drawString(stocks[i].code, 6, y0, 1);
+        // font-1 code (8px tall) shifted down 2px so it center-aligns
+        // with the 12px CJK name bitmap strip beside it
+        tft.drawString(stocks[i].code, 6, y0 + 2, 1);
       }
     }
     String valKey = has ? stocks[i].price + "|" + stocks[i].pct + "|" + String(stocks[i].up) : "";
@@ -1755,7 +3101,7 @@ void pollBridge() {
   http.end();
   DisplayMode eff = effectiveMode();
   if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK &&
-      eff != MODE_MIRROR && eff != MODE_ALBUM) {
+      eff != MODE_MIRROR && eff != MODE_ALBUM && eff != MODE_SPECTRUM) {
     // Only a real app switch clears the screen; a plain data refresh paints
     // in place so the poll doesn't flash the whole display.
     if (updateActiveApp()) drawActiveApp();
@@ -1801,7 +3147,7 @@ void handleSerialFrame(char *line) {
       showMainUiIfNeeded();
       DisplayMode eff = effectiveMode();
       if (eff != MODE_NET && eff != MODE_MUSIC && eff != MODE_STOCK &&
-          eff != MODE_MIRROR && eff != MODE_ALBUM) {
+          eff != MODE_MIRROR && eff != MODE_ALBUM && eff != MODE_SPECTRUM) {
         if (updateActiveApp()) drawActiveApp();
         else refreshActiveApp();
       }
@@ -1875,7 +3221,7 @@ void handleRoot() {
   html.reserve(3072);
   html += "<!DOCTYPE html><html><head><meta charset='utf-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<title>AI Clock 设置</title>";
+  html += "<title>AI Clock ????</title>";
   html += "<style>body{font-family:-apple-system,sans-serif;max-width:480px;margin:24px "
           "auto;padding:0 16px;color:#222} h1{font-size:20px} label{display:block;margin-top:16px;font-weight:600}"
           "input{width:100%;box-sizing:border-box;padding:8px;font-size:16px;margin-top:4px}"
@@ -1885,22 +3231,22 @@ void handleRoot() {
           "td{padding:4px 8px;border-bottom:1px solid #eee;font-size:14px}"
           ".dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}"
           "</style></head><body>";
-  html += "<h1>AI Clock 设置</h1>";
+  html += "<h1>AI Clock ????</h1>";
 
   html += "<form method='POST' action='/save'>";
   html += "<label>Bridge host (ip:port)</label>";
   html += "<input name='bridge' value='" + htmlEscape(bridgeHost) + "' placeholder='192.168.1.181:8765'>";
-  html += "<button type='submit'>保存</button>";
+  html += "<button type='submit'>????</button>";
   html += "</form>";
 
   // Backlight brightness slider: applies live on release (PWM, persisted).
-  html += "<h2 style='font-size:16px;margin-top:28px'>屏幕亮度</h2>";
+  html += "<h2 style='font-size:16px;margin-top:28px'>???????</h2>";
   html += "<input type='range' min='0' max='100' value='" + String(brightness) + "' id='bri' "
           "oninput=\"document.getElementById('briv').textContent=this.value+'%'\" "
           "onchange=\"fetch('/api/brightness',{method:'POST',headers:{'Content-Type':"
           "'application/x-www-form-urlencoded'},body:'level='+this.value})\">";
-  html += "<div style='font-size:13px;color:#555'>当前：<span id='briv'>" + String(brightness) +
-          "%</span>（0 = 熄屏，设置立即生效并记住）</div>";
+  html += "<div style='font-size:13px;color:#555'>?????<span id='briv'>" + String(brightness) +
+          "%</span>??0 = ???????????????????????</div>";
 
   // Backlight polarity invert toggle.
   html += "<div style='margin-top:8px'>";
@@ -1910,33 +3256,33 @@ void handleRoot() {
           " onchange=\"fetch('/api/brightness-invert',{method:'POST',"
           "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
           "body:'invert='+(this.checked?1:0)}).then(r=>{if(!r.ok)location.reload()})\"> "
-          "背光反向（适用于背光高低电平相反的屏幕）</label></div>";
+          "????????????????????????????</label></div>";
 
-  // Display rotation / mirror — applies live, persisted.
-  html += "<h2 style='font-size:16px;margin-top:28px'>屏幕方向 & 镜像</h2>";
+  // Display rotation / mirror ?? applies live, persisted.
+  html += "<h2 style='font-size:16px;margin-top:28px'>??????? & ????</h2>";
   html += "<select id='rotSel' onchange=\"fetch('/api/rotation',{method:'POST',"
           "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
           "body:'rot='+this.value}).then(r=>{if(!r.ok)location.reload()})\">";
   const char *rotLabels[8] = {
-    "0° 正常", "90° 顺时针", "180° 倒置", "270° 逆时针",
-    "0° 水平镜像", "90° 水平镜像", "180° 水平镜像", "270° 水平镜像"
+    "0?? ????", "90?? ????", "180?? ????", "270?? ?????",
+    "0?? ??????", "90?? ??????", "180?? ??????", "270?? ??????"
   };
   for (int i = 0; i < 8; i++) {
     html += "<option value='" + String(i) + "'" +
             (i == displayRotation ? " selected" : "") + ">" +
             rotLabels[i] + "</option>";
   }
-  html += "</select><div style='font-size:13px;color:#555'>选择后立即生效并记住</div>";
+  html += "</select><div style='font-size:13px;color:#555'>????????????????</div>";
 
   // On-device GIF upload: replaces a character's animation without reflashing.
-  html += "<h2 style='font-size:16px;margin-top:28px'>桌宠动画（上传 GIF）</h2>";
-  html += "<p style='font-size:13px;color:#555'>上传一个 .gif，设备会在板上解码并缩放到对应角色的尺寸，"
-          "立刻替换动画，无需重新编译或烧录。GIF 太大可能因内存不足解码失败，换小一点的即可。</p>";
+  html += "<h2 style='font-size:16px;margin-top:28px'>??????????? GIF??</h2>";
+  html += "<p style='font-size:13px;color:#555'>?????? .gif?????????????????????????????"
+          "?????????????????????????????GIF ???????????????????????????????</p>";
   html += "<form id='gifForm' method='POST' enctype='multipart/form-data' onsubmit='return setGifAction()'>";
-  html += "<label>角色</label>";
+  html += "<label>???</label>";
   html += "<select id='gifTarget'><option value='claude'>Claude</option><option value='codex'>Codex</option></select>";
-  html += "<label>GIF 文件</label><input type='file' name='file' accept='.gif' required>";
-  html += "<button type='submit'>上传并应用</button>";
+  html += "<label>GIF ???</label><input type='file' name='file' accept='.gif' required>";
+  html += "<button type='submit'>????????</button>";
   html += "</form>";
   html += "<script>function setGifAction(){"
           "document.getElementById('gifForm').action='/sprite/'+document.getElementById('gifTarget').value;"
@@ -1944,8 +3290,8 @@ void handleRoot() {
 
   html += "<table>";
   html += "<tr><td>WiFi SSID</td><td>" + htmlEscape(WiFi.SSID()) + "</td></tr>";
-  html += "<tr><td>设备 IP</td><td>" + WiFi.localIP().toString() + "</td></tr>";
-  html += "<tr><td>上次桥接更新</td><td>" + age + "</td></tr>";
+  html += "<tr><td>?? IP</td><td>" + WiFi.localIP().toString() + "</td></tr>";
+  html += "<tr><td>?????????</td><td>" + age + "</td></tr>";
   html += "<tr><td>Claude</td><td>" + htmlEscape(claudeStatus.status) + ", " +
           formatTokens(claudeStatus.tokensToday) + " tok</td></tr>";
   html += "<tr><td>Codex</td><td>" + htmlEscape(codexStatus.status) + ", " +
@@ -1955,9 +3301,9 @@ void handleRoot() {
                                         : "5h ?") + "</td></tr>";
   html += "</table>";
 
-  html += "<form method='POST' action='/reset-wifi' onsubmit=\"return confirm('清除 WiFi "
-          "设置并重启？设备会开启配网热点。');\">";
-  html += "<button type='submit' style='background:#dc2626'>重置 WiFi</button>";
+  html += "<form method='POST' action='/reset-wifi' onsubmit=\"return confirm('??? WiFi "
+          "?????????????????????');\">";
+  html += "<button type='submit' style='background:#dc2626'>???? WiFi</button>";
   html += "</form>";
 
   html += "</body></html>";
@@ -1984,6 +3330,7 @@ const char *displayModeName(DisplayMode m) {
   if (m == MODE_STOCK) return "stock";
   if (m == MODE_MIRROR) return "mirror";
   if (m == MODE_ALBUM) return "album";
+  if (m == MODE_SPECTRUM) return "spectrum";
   return "auto";
 }
 
@@ -2001,6 +3348,34 @@ void handleApiInfo() {
   doc["brightness"] = brightness;
   doc["brightness_invert"] = brightnessInvert;
   doc["rotation"] = displayRotation;
+  doc["spectrum_type"] = spectrumType;
+  doc["spectrum_effect"] = spectrumEffect;
+  doc["spectrum_color"] = spectrumColor;
+  doc["spectrum_color2"] = spectrumColor2;
+  doc["spectrum_peak"] = spectrumPeak;
+  doc["spectrum_smooth"] = spectrumSmooth;
+  doc["spectrum_width"] = spectrumWidth;
+  doc["spectrum_rainbow"] = spectrumRainbow;
+  doc["spectrum_gap"] = spectrumGap;
+  doc["spectrum_decay"] = spectrumDecay;
+  doc["spectrum_linew"] = spectrumLineW;
+  doc["spectrum_fill"] = spectrumFill;
+  doc["spectrum_ringw"] = spectrumRingW;
+  doc["spectrum_ringgap"] = spectrumRingGap;
+  doc["spectrum_ringinner"] = spectrumRingInner;
+  doc["spectrum_ringouter"] = spectrumRingOuter;
+  doc["spectrum_fillcolor"] = spectrumFillColor;
+  doc["spectrum_ringincolor"] = spectrumRingInColor;
+  doc["spectrum_ringfill"] = spectrumRingFill;
+  doc["spectrum_gradrange"] = spectrumGradRange;
+  doc["spectrum_gradreverse"] = spectrumGradReverse;
+  doc["spectrum_autorange"] = spectrumAutoRange;
+  doc["spectrum_offset"] = spectrumOffset;
+  doc["spectrum_silence"] = spectrumSilence;
+  doc["spectrum_mirror"] = spectrumMirror;
+  doc["spectrum_dualring"] = spectrumDualRing;
+  doc["spectrum_dualin"] = spectrumDualInner;
+  doc["spectrum_dualout"] = spectrumDualOuter;
   doc["wired"] = wiredActive(); // true = data currently arrives over USB serial
   doc["fw"] = FW_VERSION;
   JsonObject c = doc["claude"].to<JsonObject>();
@@ -2028,8 +3403,9 @@ void handleApiDisplay() {
   else if (mode == "stock") displayMode = MODE_STOCK;
   else if (mode == "mirror") displayMode = MODE_MIRROR;
   else if (mode == "album") displayMode = MODE_ALBUM;
+  else if (mode == "spectrum") displayMode = MODE_SPECTRUM;
   else {
-    webServer.send(400, "text/plain", "mode must be auto|claude|codex|net|music|stock|mirror|album");
+    webServer.send(400, "text/plain", "mode must be auto|claude|codex|net|music|stock|mirror|album|spectrum");
     return;
   }
   Serial.printf("[api] display mode = %s\n", mode.c_str());
@@ -2042,9 +3418,10 @@ void handleApiDisplay() {
   } else if (displayMode == MODE_STOCK) {
     stockChromeDrawn = false;
     lastStockPollMs = 0; // poll + draw on the next loop tick
-  } else if (displayMode == MODE_MIRROR || displayMode == MODE_ALBUM) {
+  } else if (displayMode == MODE_MIRROR || displayMode == MODE_ALBUM || displayMode == MODE_SPECTRUM) {
     lastMirrorPollMs = 0; // fetch a frame on the next loop tick
     lastAlbumPollMs = 0;
+    lastSpectrumPollMs = 0;
   } else {
     updateActiveApp();
     drawActiveApp(); // unconditional: also repaints over a previous net chart
@@ -2078,6 +3455,277 @@ void handleApiBrightnessInvert() {
   applyBrightness();
   saveBrightnessInvert();
   Serial.printf("[api] brightness_invert = %d\n", brightnessInvert);
+  webServer.send(200, "text/plain", "ok");
+}
+
+void handleApiMusicSpectrum() {
+  // Optional parameters: type=0-2, effect=0-6, color=0-7, peak=0/1,
+  // smooth=0-10, width=1-5. Any that are present are applied together.
+  String typeArg = webServer.arg("type");
+  if (typeArg.length() > 0) {
+    int t = typeArg.toInt();
+    if (t < 0 || t > 2) {
+      webServer.send(400, "text/plain", "type must be 0-2");
+      return;
+    }
+    spectrumType = t;
+    // clamp effect to the new type's range
+    int maxEffect = t == 0 ? 8 : (t == 1 ? 3 : 3);
+    if (spectrumEffect > maxEffect) spectrumEffect = maxEffect;
+  }
+  String effectArg = webServer.arg("effect");
+  if (effectArg.length() > 0) {
+    int e = effectArg.toInt();
+    int maxEffect = spectrumType == 0 ? 8 : (spectrumType == 1 ? 3 : 3);
+    if (e < 0 || e > maxEffect) {
+      webServer.send(400, "text/plain", "effect out of range for type");
+      return;
+    }
+    spectrumEffect = e;
+  }
+  String colorArg = webServer.arg("color");
+  if (colorArg.length() > 0) {
+    int c = colorArg.toInt();
+    if (c < 0 || c > 11) {
+      webServer.send(400, "text/plain", "color must be 0-11");
+      return;
+    }
+    spectrumColor = c;
+  }
+  String color2Arg = webServer.arg("color2");
+  if (color2Arg.length() > 0) {
+    int c2 = color2Arg.toInt();
+    if (c2 < 0 || c2 > 11) {
+      webServer.send(400, "text/plain", "color2 must be 0-11");
+      return;
+    }
+    spectrumColor2 = c2;
+  }
+  String peakArg = webServer.arg("peak");
+  if (peakArg.length() > 0) {
+    int p = peakArg.toInt();
+    if (p != 0 && p != 1) {
+      webServer.send(400, "text/plain", "peak must be 0 or 1");
+      return;
+    }
+    spectrumPeak = p;
+  }
+  String smoothArg = webServer.arg("smooth");
+  if (smoothArg.length() > 0) {
+    int sm = smoothArg.toInt();
+    if (sm < 0 || sm > 10) {
+      webServer.send(400, "text/plain", "smooth must be 0-10");
+      return;
+    }
+    spectrumSmooth = sm;
+  }
+  String widthArg = webServer.arg("width");
+  if (widthArg.length() > 0) {
+    int w = widthArg.toInt();
+    if (w < 1 || w > 5) {
+      webServer.send(400, "text/plain", "width must be 1-5");
+      return;
+    }
+    spectrumWidth = w;
+  }
+  String rainbowArg = webServer.arg("rainbow");
+  if (rainbowArg.length() > 0) {
+    int rb = rainbowArg.toInt();
+    if (rb != 0 && rb != 1) {
+      webServer.send(400, "text/plain", "rainbow must be 0 or 1");
+      return;
+    }
+    spectrumRainbow = rb;
+  }
+  // per-type fine-tuning params
+  String gapArg = webServer.arg("gap");
+  if (gapArg.length() > 0) {
+    int g = gapArg.toInt();
+    if (g < 0 || g > 4) {
+      webServer.send(400, "text/plain", "gap must be 0-4");
+      return;
+    }
+    spectrumGap = g;
+  }
+  String decayArg = webServer.arg("decay");
+  if (decayArg.length() > 0) {
+    int d = decayArg.toInt();
+    if (d < 1 || d > 20) {
+      webServer.send(400, "text/plain", "decay must be 1-20");
+      return;
+    }
+    spectrumDecay = d;
+  }
+  String linewArg = webServer.arg("linew");
+  if (linewArg.length() > 0) {
+    int lw = linewArg.toInt();
+    if (lw < 1 || lw > 5) {
+      webServer.send(400, "text/plain", "linew must be 1-5");
+      return;
+    }
+    spectrumLineW = lw;
+  }
+  String fillArg = webServer.arg("fill");
+  if (fillArg.length() > 0) {
+    int f = fillArg.toInt();
+    if (f != 0 && f != 1) {
+      webServer.send(400, "text/plain", "fill must be 0 or 1");
+      return;
+    }
+    spectrumFill = f;
+  }
+  // radial/ring params
+  String ringwArg = webServer.arg("ringw");
+  if (ringwArg.length() > 0) {
+    int rw = ringwArg.toInt();
+    if (rw < 1 || rw > 8) {
+      webServer.send(400, "text/plain", "ringw must be 1-8");
+      return;
+    }
+    spectrumRingW = rw;
+  }
+  String ringgapArg = webServer.arg("ringgap");
+  if (ringgapArg.length() > 0) {
+    int rg = ringgapArg.toInt();
+    if (rg < 0 || rg > 10) {
+      webServer.send(400, "text/plain", "ringgap must be 0-10");
+      return;
+    }
+    spectrumRingGap = rg;
+  }
+  String ringinArg = webServer.arg("ringinner");
+  if (ringinArg.length() > 0) {
+    int ri = ringinArg.toInt();
+    if (ri < 2 || ri > 60) {
+      webServer.send(400, "text/plain", "ringinner must be 2-60");
+      return;
+    }
+    spectrumRingInner = ri;
+  }
+  String ringoutArg = webServer.arg("ringouter");
+  if (ringoutArg.length() > 0) {
+    int ro = ringoutArg.toInt();
+    if (ro < 20 || ro > 64) {
+      webServer.send(400, "text/plain", "ringouter must be 20-64");
+      return;
+    }
+    spectrumRingOuter = ro;
+  }
+  String fillcolArg = webServer.arg("fillcolor");
+  if (fillcolArg.length() > 0) {
+    int fc = fillcolArg.toInt();
+    if (fc < 0 || fc > 11) {
+      webServer.send(400, "text/plain", "fillcolor must be 0-11");
+      return;
+    }
+    spectrumFillColor = fc;
+  }
+  String ringincolArg = webServer.arg("ringincolor");
+  if (ringincolArg.length() > 0) {
+    int rc = ringincolArg.toInt();
+    if (rc < 0 || rc > 9) {
+      webServer.send(400, "text/plain", "ringincolor must be 0-9");
+      return;
+    }
+    spectrumRingInColor = rc;
+  }
+  String ringfillArg = webServer.arg("ringfill");
+  if (ringfillArg.length() > 0) {
+    int rf = ringfillArg.toInt();
+    if (rf != 0 && rf != 1) {
+      webServer.send(400, "text/plain", "ringfill must be 0 or 1");
+      return;
+    }
+    spectrumRingFill = rf;
+  }
+  String gradrangeArg = webServer.arg("gradrange");
+  if (gradrangeArg.length() > 0) {
+    int gr = gradrangeArg.toInt();
+    if (gr < 0 || gr > 100) {
+      webServer.send(400, "text/plain", "gradrange must be 0-100");
+      return;
+    }
+    spectrumGradRange = gr;
+  }
+  String gradrevArg = webServer.arg("gradreverse");
+  if (gradrevArg.length() > 0) {
+    int gv = gradrevArg.toInt();
+    if (gv != 0 && gv != 1) {
+      webServer.send(400, "text/plain", "gradreverse must be 0 or 1");
+      return;
+    }
+    spectrumGradReverse = gv;
+  }
+  String autorangeArg = webServer.arg("autorange");
+  if (autorangeArg.length() > 0) {
+    int ar = autorangeArg.toInt();
+    if (ar != 0 && ar != 1) {
+      webServer.send(400, "text/plain", "autorange must be 0 or 1");
+      return;
+    }
+    spectrumAutoRange = ar;
+  }
+  String offsetArg = webServer.arg("offset");
+  if (offsetArg.length() > 0) {
+    int of = offsetArg.toInt();
+    if (of < -100 || of > 100) {
+      webServer.send(400, "text/plain", "offset must be -100..100");
+      return;
+    }
+    spectrumOffset = of;
+  }
+  String silenceArg = webServer.arg("silence");
+  if (silenceArg.length() > 0) {
+    int si = silenceArg.toInt();
+    if (si < 0 || si > 50) {
+      webServer.send(400, "text/plain", "silence must be 0-50");
+      return;
+    }
+    spectrumSilence = si;
+  }
+  String mirrorArg = webServer.arg("mirror");
+  if (mirrorArg.length() > 0) {
+    int mi = mirrorArg.toInt();
+    if (mi != 0 && mi != 1) {
+      webServer.send(400, "text/plain", "mirror must be 0 or 1");
+      return;
+    }
+    spectrumMirror = mi;
+  }
+  String dualringArg = webServer.arg("dualring");
+  if (dualringArg.length() > 0) {
+    int dr = dualringArg.toInt();
+    if (dr != 0 && dr != 1) {
+      webServer.send(400, "text/plain", "dualring must be 0 or 1");
+      return;
+    }
+    spectrumDualRing = dr;
+  }
+  String dualinArg = webServer.arg("dualin");
+  if (dualinArg.length() > 0) {
+    int di = dualinArg.toInt();
+    if (di < 0 || di > 100) {
+      webServer.send(400, "text/plain", "dualin must be 0-100");
+      return;
+    }
+    spectrumDualInner = di;
+  }
+  String dualoutArg = webServer.arg("dualout");
+  if (dualoutArg.length() > 0) {
+    int do2 = dualoutArg.toInt();
+    if (do2 < 0 || do2 > 100) {
+      webServer.send(400, "text/plain", "dualout must be 0-100");
+      return;
+    }
+    spectrumDualOuter = do2;
+  }
+  saveSpectrumStyle();
+  Serial.printf("[api] spectrum type=%d effect=%d color=%d peak=%d smooth=%d width=%d gap=%d decay=%d linew=%d fill=%d ringw=%d ringgap=%d ringin=%d ringout=%d fillcol=%d ringincol=%d ringfill=%d gradrange=%d gradreverse=%d autorange=%d offset=%d\n",
+                spectrumType, spectrumEffect, spectrumColor, spectrumPeak, spectrumSmooth, spectrumWidth,
+                spectrumGap, spectrumDecay, spectrumLineW, spectrumFill,
+                spectrumRingW, spectrumRingGap, spectrumRingInner, spectrumRingOuter,
+                spectrumFillColor, spectrumRingInColor, spectrumRingFill,
+                spectrumGradRange, spectrumGradReverse, spectrumAutoRange, spectrumOffset);
   webServer.send(200, "text/plain", "ok");
 }
 
@@ -2407,6 +4055,7 @@ void setupWebServer() {
   webServer.on("/api/bridge", HTTP_POST, handleApiBridge);
   webServer.on("/api/brightness", HTTP_POST, handleApiBrightness);
   webServer.on("/api/rotation", HTTP_POST, handleApiRotation);
+  webServer.on("/api/music-spectrum", HTTP_POST, handleApiMusicSpectrum);
   webServer.on("/api/brightness-invert", HTTP_POST, handleApiBrightnessInvert);
   webServer.on("/sprite/claude/reset", HTTP_POST, []() { handleSpriteReset(APP_CLAUDE); });
   webServer.on("/sprite/codex/reset", HTTP_POST, []() { handleSpriteReset(APP_CODEX); });
@@ -2435,6 +4084,7 @@ void setup() {
 
   tft.init();
   loadDisplayConfig();
+  loadSpectrumStyle();
   applyDisplayRotation();
   tft.fillScreen(TFT_BLACK);
   analogWriteFreq(BRIGHTNESS_PWM_FREQ);
@@ -2453,7 +4103,8 @@ void setup() {
     tft.drawString("WiFi connected", 8, 16, 2);
     tft.drawString("Admin page:", 8, 36, 2);
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-    tft.drawString("http://" + WiFi.localIP().toString(), 8, 56, 1);
+    // "http://" + 15-char IP overflows the 128px panel; show the bare IP.
+    tft.drawString("IP: " + WiFi.localIP().toString(), 8, 56, 1);
     delay(3000);
 
     showMainUiIfNeeded();
@@ -2464,6 +4115,16 @@ void setup() {
 }
 
 void loop() {
+  // WiFi dropped (router/modem restart, DHCP re-lease): ESP8266's auto-rejoin
+  // only runs while the SDK connection is up; after a hard drop the STA just
+  // sits disconnected. Explicitly retry the join every 10s so the device
+  // comes back without a reboot.
+  static unsigned long lastWifiRetry = 0;
+  if (WiFi.status() != WL_CONNECTED && millis() - lastWifiRetry > 10000) {
+    lastWifiRetry = millis();
+    Serial.println("[wifi] disconnected - reconnecting...");
+    WiFi.reconnect();
+  }
   wifiManager.process(); // keeps the config portal alive until WiFi is set up
   pumpSerial();          // wired (USB) bridge frames
 
@@ -2495,10 +4156,11 @@ void loop() {
     } else if (eff == MODE_STOCK) {
       stockChromeDrawn = false;
       lastStockPollMs = 0;
-    } else if (eff == MODE_MIRROR || eff == MODE_ALBUM) {
+    } else if (eff == MODE_MIRROR || eff == MODE_ALBUM || eff == MODE_SPECTRUM) {
       tft.fillScreen(TFT_BLACK); // first frame arrives on the next poll
       lastMirrorPollMs = 0;
       lastAlbumPollMs = 0;
+      lastSpectrumPollMs = 0;
     } else {
       updateActiveApp();
       drawActiveApp();
@@ -2539,6 +4201,11 @@ void loop() {
     if (nowMs - lastAlbumPollMs >= ALBUM_POLL_INTERVAL_MS) {
       lastAlbumPollMs = nowMs;
       pollAlbum();
+    }
+  } else if (eff == MODE_SPECTRUM) {
+    if (nowMs - lastSpectrumPollMs >= SPECTRUM_POLL_INTERVAL_MS) {
+      lastSpectrumPollMs = nowMs;
+      pollSpectrum();
     }
   } else {
     // sprite walk-cycle animation (only advances while that app is showing)

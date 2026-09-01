@@ -35,6 +35,7 @@ static class Program
         stockMonitor.Start();
         var mirror = new ScreenMirrorService();
         var album = new AlbumService();
+        var spectrum = new SpectrumService();
 
         var server = new MiniHttpServer(Port,
             routes: new()
@@ -47,6 +48,7 @@ static class Program
                 ["/album/list"] = () => album.ListJson(),
                 ["/album/config"] = () => album.ConfigJson(),
                 ["/mirror/config"] = () => mirror.ConfigJson(),
+                ["/music/spectrum"] = () => spectrum.ToJson(),
             },
             binaryRoutes: new()
             {
@@ -160,7 +162,7 @@ static class Program
             Console.Error.WriteLine($"[bridge] failed to bind port {Port}: {e.Message}");
         }
 
-        var context = new TrayAppContext(service, usage, netMonitor, nowPlaying, stockMonitor, mirror, album, Port);
+        var context = new TrayAppContext(service, usage, netMonitor, nowPlaying, stockMonitor, mirror, album, spectrum, Port);
         usage.StartAutoRefresh();
         Application.Run(context);
     }

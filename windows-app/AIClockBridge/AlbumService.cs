@@ -10,7 +10,7 @@ namespace AIClockBridge;
 // user-configurable (AlbumSettingsDialog). Auto-play is driven by an
 // internal timer: it advances the slide and re-encodes the cached frame on
 // its own clock, so /album/raw (device poll) and the mirror popup preview
-// both simply *read* the same cached frame ‚Äî they can never drift apart.
+// both simply *read* the same cached frame ùù they can never drift apart.
 // Manual stepping (next/previous/random) forces a frame update instead.
 sealed class AlbumService
 {
@@ -55,10 +55,19 @@ sealed class AlbumService
     bool _manualMode;
     /// Manual mode: the auto-advance timer is suspended; only
     /// PrevRgb565/NextManualRgb565/RandomRgb565 change the photo.
+    /// On autoùùmanual transition, _index is rewound by one so it points
+    /// to the currently-displayed photo (in auto mode AutoAdvance encodes
+    /// then advances, so _index is always one ahead of what's on screen).
     public bool ManualMode
     {
         get => _manualMode;
-        set { _manualMode = value; RestartTimer(); }
+        set
+        {
+            if (!_manualMode && value && _photos.Count > 0)
+                _index = (_index - 1 + _photos.Count) % _photos.Count;
+            _manualMode = value;
+            RestartTimer();
+        }
     }
 
     /// Photo placement on the panel.
@@ -313,7 +322,7 @@ sealed class AlbumService
         return System.Text.Encoding.UTF8.GetBytes(json);
     }
 
-    /// Current photo as big-endian RGB565 ‚Äî a pure read of the frame the
+    /// Current photo as big-endian RGB565 ùù a pure read of the frame the
     /// background timer (or a manual step) last produced. Both the device's
     /// /album/raw poll and the mirror popup preview call this and get the
     /// exact same bytes, so the two can never drift out of sync.
@@ -343,8 +352,8 @@ sealed class AlbumService
         lock (_lock)
         {
             if (_photos.Count == 0) return Array.Empty<byte>();
-            _cachedFrame = EncodePhoto(_photos[_index]);
             Advance();
+            _cachedFrame = EncodePhoto(_photos[_index]);
             return _cachedFrame;
         }
     }

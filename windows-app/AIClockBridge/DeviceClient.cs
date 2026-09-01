@@ -21,6 +21,34 @@ class DeviceInfo
     public int LastUpdateS = -1;       // seconds since the device last got /status data, -1 = never
     public int SpriteRev;              // bumped by the device on animation change
     public int Brightness = 100;       // backlight 0-100 (0 = off)
+    public int SpectrumType;           // spectrum type 0 bars / 1 wave / 2 radial
+    public int SpectrumEffect;         // per-type effect index
+    public int SpectrumColor;          // palette 0..7
+    public int SpectrumColor2;         // secondary palette 0..7 (combo styles)
+    public int SpectrumPeak = 1;       // peak dots 0/1
+    public int SpectrumSmooth = 3;     // time smoothing 0..10
+    public int SpectrumWidth = 3;      // bar width 1..5
+    public int SpectrumRainbow;        // 0=solid 1=spectrum by value
+    public int SpectrumGap = 1;        // bars: bar gap 0..2
+    public int SpectrumDecay = 5;      // bars: peak-hold decay 1..10
+    public int SpectrumLineW = 1;      // wave: line thickness 1..5
+    public int SpectrumFill;           // wave: fill under line 0/1
+    public int SpectrumFillColor;      // wave: fill palette 0..11 (incl. rainbow)
+    public int SpectrumRingW = 2;      // radial: ring line thickness 1..8
+    public int SpectrumRingGap = 2;    // radial: gap between spokes 0..10
+    public int SpectrumRingInner = 12; // radial: inner circle radius 2..60
+    public int SpectrumRingOuter = 58; // radial: outer circle radius 20..64
+    public int SpectrumRingInColor = 1;// radial: inner ring color 0..8 (8=black)
+    public int SpectrumRingFill = 1;   // radial: ring polyline fill 0/1
+    public int SpectrumGradRange = 100;// …´∆◊––: gradient sweep height 0..100%
+    public int SpectrumGradReverse;    // …´∆◊––: 0=’˝–Ú 1=µπ–Ú
+    public int SpectrumAutoRange;      // bars: 1=normalize to live min/max
+    public int SpectrumOffset;         // bars: -100..100 height offset
+    public int SpectrumSilence = 6;    // silence gate 0..50
+    public int SpectrumMirror;         // 1=mirror bars/wave vertically
+    public int SpectrumDualRing;       // 1=dual-ring for ª∑–Œ/…»–Œ radial styles
+    public int SpectrumDualInner = 100;// dual-ring inner sweep 0..100%
+    public int SpectrumDualOuter = 100;// dual-ring outer reach 0..100%
     public bool ClaudeCustomSprite;
     public bool CodexCustomSprite;
     public int ClaudeW = 111, ClaudeH = 120;
@@ -37,10 +65,22 @@ static class DeviceClient
     const string HostKey = "device_host";
     const string LastSeenKey = "device_last_seen";
 
-    // per-request CancellationTokenSources carry the timeouts (5s info, 8s
-    // posts, 30s sprite pull, 60s GIF upload+on-device decode), so the client
-    // itself must not impose a shorter global one
-    static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
+    // The ESP8266's lightweight HTTP server closes keep-alive connections
+    // after a short idle period, but .NET's connection pool doesn't learn
+    // the socket is dead until it tries to reuse it °™ so every ~10s a
+    // pooled connection goes stale and the next request fails with a
+    // "connection reset" that the preview reads as "Œﬁ∑®¡¨Ω”…Ë±∏".  Fix:
+    // send Connection: close on every request so each gets a fresh TCP
+    // connection.  The handshake to a LAN device is <1ms, negligible vs
+    // the 1s poll interval, and the ESP8266's tiny PCB table is never
+    // stranded by half-open sockets.
+    static readonly HttpClient Http = CreateHttp();
+    static HttpClient CreateHttp()
+    {
+        var h = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        h.DefaultRequestHeaders.ConnectionClose = true;
+        return h;
+    }
 
     public static string Host
     {
@@ -48,7 +88,7 @@ static class DeviceClient
         set => Settings.Set(HostKey, value);
     }
 
-    /// Last LAN address that polled our /status ‚Äî i.e. the clock itself.
+    /// Last LAN address that polled our /status °™ i.e. the clock itself.
     public static string LastSeenIp
     {
         get => Settings.Get(LastSeenKey);
@@ -68,7 +108,7 @@ static class DeviceClient
 
     static Uri Resolve(string path)
     {
-        var b = BaseUrl ?? throw new DeviceException("Êú™ËÆæÁΩÆËÆæÂ§áÂú∞ÂùÄÔºåËØ∑ÂÖàÂú®ËèúÂçïÈáåÂ°´ÂÜôËÆæÂ§á IP");
+        var b = BaseUrl ?? throw new DeviceException("Œ¥…Ë÷√…Ë±∏µÿ÷∑£¨«Îœ»‘⁄≤Àµ•¿ÔÃÓ–¥…Ë±∏ IP");
         return new Uri(b, path);
     }
 
@@ -84,7 +124,7 @@ static class DeviceClient
         catch (DeviceException) { throw; }
         catch (Exception e)
         {
-            throw new DeviceException($"Êó†Ê≥ïËøûÊé•ËÆæÂ§áÔºö{e.Message}");
+            throw new DeviceException($"Œﬁ∑®¡¨Ω”…Ë±∏£∫{e.Message}");
         }
         try
         {
@@ -99,6 +139,34 @@ static class DeviceClient
                 LastUpdateS = Int(root, "last_update_s", -1),
                 SpriteRev = Int(root, "sprite_rev"),
                 Brightness = Int(root, "brightness", 100),
+                SpectrumType = Int(root, "spectrum_type", 0),
+                SpectrumEffect = Int(root, "spectrum_effect", 0),
+                SpectrumColor = Int(root, "spectrum_color", 0),
+                SpectrumColor2 = Int(root, "spectrum_color2", 1),
+                SpectrumPeak = Int(root, "spectrum_peak", 1),
+                SpectrumSmooth = Int(root, "spectrum_smooth", 3),
+                SpectrumWidth = Int(root, "spectrum_width", 3),
+                SpectrumRainbow = Int(root, "spectrum_rainbow", 0),
+                SpectrumGap = Int(root, "spectrum_gap", 1),
+                SpectrumDecay = Int(root, "spectrum_decay", 5),
+                SpectrumLineW = Int(root, "spectrum_linew", 1),
+                SpectrumFill = Int(root, "spectrum_fill", 0),
+                SpectrumFillColor = Int(root, "spectrum_fillcolor", 0),
+                SpectrumRingW = Int(root, "spectrum_ringw", 2),
+                SpectrumRingGap = Int(root, "spectrum_ringgap", 2),
+                SpectrumRingInner = Int(root, "spectrum_ringinner", 12),
+                SpectrumRingOuter = Int(root, "spectrum_ringouter", 58),
+                SpectrumRingInColor = Int(root, "spectrum_ringincolor", 1),
+                SpectrumRingFill = Int(root, "spectrum_ringfill", 1),
+                SpectrumGradRange = Int(root, "spectrum_gradrange", 100),
+                SpectrumGradReverse = Int(root, "spectrum_gradreverse", 0),
+                SpectrumAutoRange = Int(root, "spectrum_autorange", 0),
+                SpectrumOffset = Int(root, "spectrum_offset", 0),
+                SpectrumSilence = Int(root, "spectrum_silence", 6),
+                SpectrumMirror = Int(root, "spectrum_mirror", 0),
+                SpectrumDualRing = Int(root, "spectrum_dualring", 0),
+                SpectrumDualInner = Int(root, "spectrum_dualin", 100),
+                SpectrumDualOuter = Int(root, "spectrum_dualout", 100),
                 Showing = Str(root, "showing"),
             };
             info.Effective = Str(root, "effective", info.Mode);
@@ -118,7 +186,7 @@ static class DeviceClient
         }
         catch (Exception)
         {
-            throw new DeviceException("ËÆæÂ§áÂìçÂ∫îËß£ÊûêÂ§±Ë¥•");
+            throw new DeviceException("…Ë±∏œÏ”¶Ω‚Œˆ ß∞‹");
         }
     }
 
@@ -134,7 +202,17 @@ static class DeviceClient
     public static Task SetBrightness(int level) =>
         PostForm("api/brightness", new() { ["level"] = level.ToString() });
 
-    /// POST /sprite/{claude|codex}  multipart GIF upload ‚Äî the device decodes
+    /// POST /api/music-spectrum type=0..2 °™ switch the device's spectrum
+    /// type (0 bars / 1 wave / 2 radial); effect clamps to the type range.
+    public static Task SetMusicSpectrumType(int type) =>
+        PostForm("api/music-spectrum", new() { ["type"] = type.ToString() });
+
+    /// POST /api/music-spectrum with a query string like
+    /// "style=2&color=3&peak=1&smooth=5&width=3" °™ apply spectrum settings.
+    public static Task SetMusicSpectrum(string query) =>
+        PostForm("api/music-spectrum?" + query, new());
+
+    /// POST /sprite/{claude|codex}  multipart GIF upload °™ the device decodes
     /// and rescales the GIF on-board, then swaps the animation immediately.
     public static async Task UploadGif(byte[] gif, string slot)
     {
@@ -151,15 +229,15 @@ static class DeviceClient
         }
         catch (Exception e)
         {
-            throw new DeviceException($"‰∏ä‰º†Â§±Ë¥•Ôºö{e.Message}");
+            throw new DeviceException($"…œ¥´ ß∞‹£∫{e.Message}");
         }
         using (resp) await ThrowUnlessOk(resp);
     }
 
-    /// POST /sprite/{claude|codex}/reset ‚Äî back to the compiled-in animation.
+    /// POST /sprite/{claude|codex}/reset °™ back to the compiled-in animation.
     public static Task ResetSprite(string slot) => PostForm($"sprite/{slot}/reset", new());
 
-    /// GET /sprite/{claude|codex}/raw ‚Äî the animation the device is actually
+    /// GET /sprite/{claude|codex}/raw °™ the animation the device is actually
     /// using, wire format [1 byte frame count][RGB565 big-endian frames...].
     public static async Task<byte[]> FetchSpriteRaw(string slot)
     {
@@ -172,9 +250,9 @@ static class DeviceClient
         catch (DeviceException) { throw; }
         catch (Exception e)
         {
-            throw new DeviceException($"ÊãâÂèñÂä®ÁîªÂ§±Ë¥•Ôºö{e.Message}");
+            throw new DeviceException($"¿≠»°∂Øª≠ ß∞‹£∫{e.Message}");
         }
-        if (data.Length <= 1) throw new DeviceException("ËÆæÂ§áÂìçÂ∫îËß£ÊûêÂ§±Ë¥•");
+        if (data.Length <= 1) throw new DeviceException("…Ë±∏œÏ”¶Ω‚Œˆ ß∞‹");
         return data;
     }
 
@@ -192,7 +270,7 @@ static class DeviceClient
         }
         catch (Exception e)
         {
-            throw new DeviceException($"ËØ∑Ê±ÇÂ§±Ë¥•Ôºö{e.Message}");
+            throw new DeviceException($"«Î«Û ß∞‹£∫{e.Message}");
         }
         using (resp) await ThrowUnlessOk(resp);
     }
@@ -202,7 +280,7 @@ static class DeviceClient
         if (resp.IsSuccessStatusCode) return;
         var msg = "";
         try { msg = await resp.Content.ReadAsStringAsync(); } catch { }
-        throw new DeviceException($"ËÆæÂ§áËøîÂõû HTTP {(int)resp.StatusCode} {msg}");
+        throw new DeviceException($"…Ë±∏∑µªÿ HTTP {(int)resp.StatusCode} {msg}");
     }
 
     static string Str(JsonElement o, string k, string dflt = "")
@@ -253,7 +331,7 @@ static class DeviceClient
 
         foreach (var ip in candidates)
         {
-            progress($"È™åËØÅ {ip}‚Ä¶");
+            progress($"—È÷§ {ip}°≠");
             if (await VerifyDevice(ip))
             {
                 Host = ip;
@@ -271,7 +349,7 @@ static class DeviceClient
         var dot = myIp?.LastIndexOf('.') ?? -1;
         if (myIp == null || dot < 0) return null;
         var prefix = myIp[..dot];
-        progress($"Êâ´Êèè {prefix}.1-254‚Ä¶");
+        progress($"…®√Ë {prefix}.1-254°≠");
 
         using var sem = new SemaphoreSlim(32);
         string found = null;
@@ -301,7 +379,6 @@ static class DeviceClient
     }
 
     // MARK: - pairing watchdog
-
     /// Stamped on every device poll of our /status|/net|/music (see Program.cs).
     public static DateTime DevicePollAt = DateTime.MinValue;
 
@@ -344,7 +421,7 @@ static class DeviceClient
         }
     }
 
-    /// LAN IPv4 of this PC ‚Äî used for one-click "point the device's bridge at
+    /// LAN IPv4 of this PC °™ used for one-click "point the device's bridge at
     /// this machine". Prefers an interface that has a default gateway.
     public static string LocalIPv4()
     {
