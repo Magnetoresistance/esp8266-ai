@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 灏忓睆骞?路 GC9107 鐗?鈥?缃戦〉涓€閿儳褰?/title>
-<meta name="description" content="鍩轰簬 pengchujin/esp8266-ai 浜屾寮€鍙戠殑 ESP8266 AI 鐘舵€佸皬灞忥紙128脳128 GC9107锛夛紝鏀寔娴忚鍣ㄤ竴閿儳褰曞浐浠躲€?>
+<title>AI 小屏幕 · GC9107 版 — 网页一键烧录</title>
+<meta name="description" content="基于 pengchujin/esp8266-ai 二次开发的 ESP8266 AI 状态小屏（128×128 GC9107），支持浏览器一键烧录固件。">
 <style>
   :root{
     --bg:#0d0f14; --panel:#161a22; --panel2:#1c2130; --line:#2a3040;
@@ -82,11 +82,11 @@
 
 <nav>
   <div class="wrap">
-    <span class="brand"><span class="logo">鈻?/span>AI 灏忓睆骞?<span style="color:var(--dim);font-weight:400;font-size:13px">GC9107 鐗?/span></span>
+    <span class="brand"><span class="logo">▶</span>AI 小屏幕 <span style="color:var(--dim);font-weight:400;font-size:13px">GC9107 版</span></span>
     <span class="links">
-      <a href="#features">鍔熻兘</a>
-      <a href="#flash">鐑у綍鍥轰欢</a>
-      <a href="#flash-faq">鐑у綍 FAQ</a>
+      <a href="#features">功能</a>
+      <a href="#flash">烧录固件</a>
+      <a href="#flash-faq">烧录 FAQ</a>
       <a href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">GitHub</a>
     </span>
   </div>
@@ -94,119 +94,119 @@
 
 <header>
   <div class="wrap">
-    <span class="badge">鍩轰簬 pengchujin/esp8266-ai 浜屾寮€鍙?路 鎰熻阿鍘熶綔鑰呭紑婧?/span>
-    <h1>妗屼笂鐨勪竴鍙?<span class="ai">AI 鐘舵€佸皬鐢佃剳</span></h1>
-    <p class="sub">涓€鍧?128脳128 鐨勫鍙ゅ皬鐢佃锛圙C9107锛夛紝瀹炴椂鏄剧ず Claude Code / Codex CLI 鐨勫伐浣滅姸鎬佷笌棰濆害锛岃繕鑳藉睆骞曢暅鍍忋€佹斁鐩稿唽銆佽烦闊充箰棰戣氨銆傛棤闇€浠讳綍 API key銆?/p>
+    <span class="badge">基于 pengchujin/esp8266-ai 二次开发 · 感谢原作者开源</span>
+    <h1>桌上的一台 <span class="ai">AI 状态小电脑</span></h1>
+    <p class="sub">一块 128×128 的复古小电视（GC9107），实时显示 Claude Code / Codex CLI 的工作状态与额度，还能屏幕镜像、放相册、跳音乐频谱。无需任何 API key。</p>
     <div class="cta">
-      <a class="btn btn-primary" href="#flash">鈻?鐑у綍鍥轰欢</a>
-      <a class="btn btn-ghost" href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">鈼?鍦?GitHub 鏌ョ湅</a>
+      <a class="btn btn-primary" href="#flash">▶ 烧录固件</a>
+      <a class="btn btn-ghost" href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">◆ 在 GitHub 查看</a>
     </div>
     <div class="tags">
-      <span>鏃犻渶 API key</span><span>缃戦〉涓€閿埛鏈?/span><span>128脳128 GC9107</span><span>1MB Flash 閫傞厤</span><span>纭欢 + 杞欢鍏ㄥ紑婧?/span>
+      <span>无需 API key</span><span>网页一键刷机</span><span>128×128 GC9107</span><span>1MB Flash 适配</span><span>硬件 + 软件全开源</span>
     </div>
   </div>
 </header>
 
 <section id="features">
   <div class="wrap">
-    <h2>瀹冭兘鏄剧ず浠€涔?span class="en">What it shows</span></h2>
-    <p class="lead">缁ф壙鍘熼」鐩叏閮ㄨ兘鍔涳紝骞舵柊澧炰笁涓〉闈€?/p>
+    <h2>它能显示什么<span class="en">What it shows</span></h2>
+    <p class="lead">继承原项目全部能力，并新增三个页面。</p>
     <div class="grid">
-      <div class="card"><h3>AI 宸ヤ綔鐘舵€佷笌棰濆害</h3><p>妗屽疇鍔ㄨ捣鏉?= AI 姝ｅ湪骞叉椿銆傛柟褰㈣繘搴︾幆 + 澶у瓧鏄剧ず 5 灏忔椂 / 鍛ㄩ搴︾湡瀹炵敤閲忥紝绛変綘瀹℃壒鏃惰竟妗嗙孩闂€?/p></div>
-      <div class="card"><h3>缃戦€熷疄鏃剁洃瑙?/h3><p>浠诲姟绠＄悊鍣ㄩ鏍肩殑涓婁笅琛屾洸绾匡紝婊氬姩绐楀彛鑷姩璋冩暣閲忕▼銆?/p></div>
-      <div class="card"><h3>闊充箰鎾斁鏄剧ず</h3><p>涓撹緫灏侀潰銆佹瓕鍚嶃€佹瓕鎵嬨€佽繘搴︽潯瀹炴椂鍚屾锛岃嚜鍔ㄥ垏鍏ュ垏鍥炪€?/p></div>
-      <div class="card"><h3>鍙崲妗屽疇</h3><p>鍐呯疆 petdex.dev 鐢诲粖 3300+ 寮€婧愭瀹狅紝涔熷彲涓婁紶浠绘剰 GIF锛屾澘涓婄洿鎺ヨВ鐮併€?/p></div>
-      <div class="card"><h3>灞忓箷闀滃儚<span class="new">鏂板</span></h3><p>PC 鍏ㄥ睆 / 鎸囧畾绐楀彛 / 妗嗛€夊尯鍩燂紝瀹炴椂闀滃儚鍒板皬灞忥紙Windows 妗ユ帴锛夈€?/p></div>
-      <div class="card"><h3>鐓х墖鐩稿唽<span class="new">鏂板</span></h3><p>鏈湴鐩綍骞荤伅鐗囪疆鎾紝闂撮殧 / 椤哄簭 / 闅忔満鍒囨崲闅忔墜鎺у埗銆?/p></div>
-      <div class="card"><h3>闊充箰棰戣氨<span class="new">鏂板</span></h3><p>WASAPI 鎶撳彇绯荤粺闊抽鍋?24 娈甸璋憋紝鏌辩姸 / 娉㈠舰 / 鐜舰鍗佷綑绉嶆晥鏋滐紝涓嶅綍鍒朵笉瀛樺偍闊抽銆?/p></div>
-      <div class="card"><h3>鑲＄エ琛屾儏</h3><p>鑵捐琛屾儏鎺ュ彛锛屾定绾㈣穼缁匡紝涓枃鍚嶄綅鍥炬竻鏅版樉绀恒€?/p></div>
+      <div class="card"><h3>AI 工作状态与额度</h3><p>桌宠动起来 = AI 正在干活。方形进度环 + 大字显示 5 小时 / 周额度真实用量，等你审批时边框红闪。</p></div>
+      <div class="card"><h3>网速实时监视</h3><p>任务管理器风格的上下行曲线，滚动窗口自动调整量程。</p></div>
+      <div class="card"><h3>音乐播放显示</h3><p>专辑封面、歌名、歌手、进度条实时同步，自动切入切回。</p></div>
+      <div class="card"><h3>可换桌宠</h3><p>内置 petdex.dev 画廊 3300+ 开源桌宠，也可上传任意 GIF，板上直接解码。</p></div>
+      <div class="card"><h3>屏幕镜像<span class="new">新增</span></h3><p>PC 全屏 / 指定窗口 / 框选区域，实时镜像到小屏（Windows 桥接）。</p></div>
+      <div class="card"><h3>照片相册<span class="new">新增</span></h3><p>本地目录幻灯片轮播，间隔 / 顺序 / 随机切换随手控制。</p></div>
+      <div class="card"><h3>音乐频谱<span class="new">新增</span></h3><p>WASAPI 抓取系统音频做 24 段频谱，柱状 / 波形 / 环形十余种效果，不录制不存储音频。</p></div>
+      <div class="card"><h3>股票行情</h3><p>腾讯行情接口，涨红跌绿，中文名位图清晰显示。</p></div>
     </div>
   </div>
 </section>
 
 <section id="flash">
   <div class="wrap">
-    <h2>缃戦〉涓€閿儳褰?span class="en">Flash from the browser</span></h2>
-    <p class="lead">鍦ㄦ祻瑙堝櫒閲屽畬鎴愮儳褰曪紝涓嶈浠讳綍宸ュ叿銆傛湰椤靛浐浠堕€傞厤 <b>1MB Flash 鐨?ESP-12S</b>锛圖OUT 妯″紡锛夈€?/p>
+    <h2>网页一键烧录<span class="en">Flash from the browser</span></h2>
+    <p class="lead">在浏览器里完成烧录，不装任何工具。本页固件适配 <b>1MB Flash 的 ESP-12S</b>（DOUT 模式）。</p>
 
     <div class="flash-box">
       <div class="steps">
-        <div class="step"><b><span class="n">1</span>鎻掍笂璁惧</b>鐢?USB <b>鏁版嵁绾?/b>杩炴帴璁惧涓庣數鑴戯紙寰堝绾垮彧鑳藉厖鐢碉紝鐑т笉涓婅鍏堟崲绾匡級銆?/div>
-        <div class="step"><b><span class="n">2</span>杩炴帴骞剁儳褰?/b>鐐逛笅鏂规寜閽紝鍦ㄥ脊绐楅噷閫変腑涓插彛锛圵indows 閫氬父鏄?CH340 寮€澶寸殑 COM 鍙ｏ級銆?/div>
-        <div class="step"><b><span class="n">3</span>绛夊緟瀹屾垚</b>鐑у綍绾?30~60 绉掞紝璁惧鑷姩閲嶅惎寮€鏈猴紝闅忓悗鎸夊睆骞曟彁绀洪厤缃戙€?/div>
+        <div class="step"><b><span class="n">1</span>插上设备</b>用 USB <b>数据线</b>连接设备与电脑（很多线只能充电，烧不上请先换线）。</div>
+        <div class="step"><b><span class="n">2</span>连接并烧录</b>点下方按钮，在弹窗里选中串口（Windows 通常是 CH340 开头的 COM 口）。</div>
+        <div class="step"><b><span class="n">3</span>等待完成</b>烧录约 30~60 秒，设备自动重启开机，随后按屏幕提示配网。</div>
       </div>
 
       <esp-web-install-button manifest="./manifest.json" id="flashbtn">
-        <button slot="activate">鈻?杩炴帴璁惧骞剁儳褰?/button>
-        <span slot="unsupported" class="no-serial" style="display:inline-block">褰撳墠娴忚鍣ㄤ笉鏀寔 Web Serial 鈥斺€?璇蜂娇鐢ㄦ闈㈢増 Chrome 鎴?Edge 鎵撳紑鏈〉锛堟墜鏈轰笌 360 / QQ 绛夋祻瑙堝櫒涓嶆敮鎸侊級銆?/span>
-        <span slot="not-allowed" class="no-serial" style="display:inline-block">娴忚鍣ㄦ湭鎺堜簣涓插彛鏉冮檺锛岃鍦ㄥ脊绐椾腑鐐瑰嚮銆屽厑璁搞€嶃€?/span>
+        <button slot="activate">▶ 连接设备并烧录</button>
+        <span slot="unsupported" class="no-serial" style="display:inline-block">当前浏览器不支持 Web Serial —— 请使用桌面版 Chrome 或 Edge 打开本页（手机与 360 / QQ 等浏览器不支持）。</span>
+        <span slot="not-allowed" class="no-serial" style="display:inline-block">浏览器未授予串口权限，请在弹窗中点击「允许」。</span>
       </esp-web-install-button>
 
-      <p class="flash-meta">鍥轰欢 v0.5.1 路 ESP8266 路 DOUT 路 浠呭浐浠?@ 0x0锛?71 KB锛?MB Flash 甯冨眬锛?/p>
+      <p class="flash-meta">固件 v0.5.1 · ESP8266 · DOUT · 仅固件 @ 0x0（871 KB，1MB Flash 布局）</p>
 
-      <div class="warnline">鈿?鏈〉鐑у綍鐨勬槸 <b>GC9107 128脳128 路 1MB Flash</b> 瀹氬埗鍥轰欢锛堟湰 fork 纭欢锛夈€傚鏋滀綘鐢ㄧ殑鏄師鐗?240脳240 鐨?SD2 灏忕數瑙嗭紝<b>璇峰嬁浣跨敤鏈〉</b>锛岃鍒?<a href="https://mac.qust.me/#flash" target="_blank" rel="noopener">鍘熶綔鑰呭畼缃?mac.qust.me</a> 鐑у綍銆?/div>
-      <p class="note">棣栨鐑у綍寤鸿鍦ㄥ脊绐椾腑鍕鹃€?b>鎿﹂櫎璁惧</b>銆備覆鍙ｅ脊绐楁槸绌虹殑锛熻<a href="#flash-faq">涓嬫柟鎺掓煡</a>銆?/p>
+      <div class="warnline">⚠ 本页烧录的是 <b>GC9107 128×128 · 1MB Flash</b> 定制固件（本 fork 硬件）。如果你用的是原版 240×240 的 SD2 小电视，<b>请勿使用本页</b>，请到 <a href="https://mac.qust.me/#flash" target="_blank" rel="noopener">原作者官网 mac.qust.me</a> 烧录。</div>
+      <p class="note">首次烧录建议在弹窗中勾选<b>擦除设备</b>。串口弹窗是空的？见<a href="#flash-faq">下方排查</a>。</p>
     </div>
   </div>
 </section>
 
 <section id="flash-faq" class="faq">
   <div class="wrap">
-    <h2>鐑у綍甯歌闂<span class="en">Troubleshooting</span></h2>
-    <p class="lead">鎸夎澶囩鐞嗗櫒 / 娴忚鍣ㄨ〃鐜板鍙峰叆搴с€?/p>
+    <h2>烧录常见问题<span class="en">Troubleshooting</span></h2>
+    <p class="lead">按设备管理器 / 浏览器表现对号入座。</p>
 
     <details>
-      <summary><span class="plat win">Windows</span>璁惧绠＄悊鍣ㄩ噷鐪嬩笉鍒?CH340 涓插彛</summary>
-      <div class="a">鍏堟崲涓€鏍?<b>USB 鏁版嵁绾?/b>锛堝鏁扮嚎鍙兘鍏呯數锛夛紝骞舵崲涓?USB 鍙ｃ€傝嫢浠嶆病鏈夛紝瀹夎 <a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH340 椹卞姩锛圕H341SER.EXE锛?/a>鍚庨噸鏂版彃鎷斻€?/div>
+      <summary><span class="plat win">Windows</span>设备管理器里看不到 CH340 串口</summary>
+      <div class="a">先换一根 <b>USB 数据线</b>（多数线只能充电），并换个 USB 口。若仍没有，安装 <a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH340 驱动（CH341SER.EXE）</a>后重新插拔。</div>
     </details>
     <details>
-      <summary><span class="plat win">Windows</span>CH340 甯﹂粍鑹叉劅鍙瑰彿锛屾彁绀恒€岃璁惧鏃犳硶鍚姩 (浠ｇ爜 10)銆?/summary>
-      <div class="a">鏉胯浇 CH340 鏄吋瀹硅姱鐗囷紝琚柊鐗堝畼鏂归┍鍔ㄦ嫤鎴細鍗歌浇鐜版湁椹卞姩锛屾敼瑁?<a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH341SER 3.5 鏃х増椹卞姩</a>锛涜澶囩鐞嗗櫒閲屽彸閿澶?鈫?鏇存柊椹卞姩绋嬪簭 鈫?娴忚璁＄畻鏈?鈫?閫夋嫨鏃х増鏈€?/div>
+      <summary><span class="plat win">Windows</span>CH340 带黄色感叹号，提示「该设备无法启动 (代码 10)」</summary>
+      <div class="a">板载 CH340 是兼容芯片，被新版官方驱动拦截：卸载现有驱动，改装 <a href="https://www.wch.cn/downloads/CH341SER_EXE.html" target="_blank" rel="noopener">CH341SER 3.5 旧版驱动</a>；设备管理器里右键设备 → 更新驱动程序 → 浏览计算机 → 选择旧版本。</div>
     </details>
     <details>
-      <summary><span class="plat win">Windows</span>涓插彛涓€鍒囨甯革紝浣嗘祻瑙堝櫒寮圭獥閲屾病鏈夌鍙?/summary>
-      <div class="a">鐢?b>瀹樻柟 Chrome 鎴?Edge</b> 閲嶆柊鎵撳紑鏈〉锛?60銆丵Q 绛夋祻瑙堝櫒闃夊壊浜?Web Serial锛夛紝骞跺叧闂?Arduino IDE銆佷覆鍙ｇ洃瑙嗗櫒銆佹ˉ鎺ョ▼搴忕瓑鍗犵敤涓插彛鐨勮蒋浠跺悗閲嶈瘯銆?/div>
+      <summary><span class="plat win">Windows</span>串口一切正常，但浏览器弹窗里没有端口</summary>
+      <div class="a">用<b>官方 Chrome 或 Edge</b> 重新打开本页（360、QQ 等浏览器阉割了 Web Serial），并关闭 Arduino IDE、串口监视器、桥接程序等占用串口的软件后重试。</div>
     </details>
     <details>
-      <summary><span class="plat win">Windows</span>涓插彛鑺墖涓嶆槸 CH340锛?/summary>
-      <div class="a">鐪嬩竴鐪兼澘瀛愪覆鍙ｈ姱鐗囦笣鍗帮細濡傛灉鏄?<b>CH9102</b> 鎴?<b>CP2102</b>锛學indows 闇€瀹夎瀵瑰簲椹卞姩锛汳ac 渚濈劧鍏嶉┍銆?/div>
+      <summary><span class="plat win">Windows</span>串口芯片不是 CH340？</summary>
+      <div class="a">看一眼板子串口芯片丝印：如果是 <b>CH9102</b> 或 <b>CP2102</b>，Windows 需安装对应驱动；Mac 依然免驱。</div>
     </details>
     <details>
-      <summary><span class="plat mac">macOS</span>闇€瑕佽椹卞姩鍚楋紵</summary>
-      <div class="a"><b>涓嶉渶瑕?/b> 鈥斺€?macOS 鑷甫 CH340 椹卞姩銆傝嫢涔嬪墠瑁呰繃绗笁鏂归┍鍔ㄨ绯荤粺鎷︽埅锛屽埌銆岀郴缁熻缃?鈫?闅愮涓庡畨鍏ㄦ€с€嶅厑璁革紝鎴栧嵏杞藉悗鐢ㄧ郴缁熻嚜甯﹂┍鍔ㄣ€?/div>
+      <summary><span class="plat mac">macOS</span>需要装驱动吗？</summary>
+      <div class="a"><b>不需要</b> —— macOS 自带 CH340 驱动。若之前装过第三方驱动被系统拦截，到「系统设置 → 隐私与安全性」允许，或卸载后用系统自带驱动。</div>
     </details>
     <details>
-      <summary>鐑у綍鍒颁竴鍗婂け璐?/ 鏍￠獙閿欒</summary>
-      <div class="a">鎹竴鏍硅川閲忓ソ鐨勬暟鎹嚎銆佹崲涓?USB 鍙ｏ紙浼樺厛鐩磋繛涓绘澘锛岄伩寮€ Hub锛夛紝鍏抽棴鍗犵敤涓插彛鐨勭▼搴忓悗閲嶈瘯锛涘脊绐椾腑鍕鹃€?b>鎿﹂櫎璁惧</b>鍐嶇儳涓€娆°€?/div>
+      <summary>烧录到一半失败 / 校验错误</summary>
+      <div class="a">换一根质量好的数据线、换个 USB 口（优先直连主板，避开 Hub），关闭占用串口的程序后重试；弹窗中勾选<b>擦除设备</b>再烧一次。</div>
     </details>
     <details>
-      <summary>1MB Flash 鐗堟湁浠€涔堥檺鍒讹紵</summary>
-      <div class="a">1MB 鑺墖鏀句笉涓嬪浐浠?+ 鏂囦欢绯荤粺锛屽洜姝ゆ湰鍥轰欢<b>涓嶅惈鏂囦欢绯荤粺鍒嗗尯</b>锛氫寒搴︺€侀璋辨牱寮忋€佹樉绀烘棆杞瓑璁剧疆閲嶅惎鍚?b>涓嶄細淇濆瓨</b>锛堟瘡娆″紑鏈轰负榛樿鍊硷級锛學iFi 閰嶇綉涓庢墍鏈夋樉绀哄姛鑳戒笉鍙楀奖鍝嶃€?MB Flash 鐨勬澘瀛愬彲鐢ㄤ粨搴撻噷鐨?nodemcuv2 瀹屾暣鐗堟瀯寤恒€?/div>
+      <summary>1MB Flash 版有什么限制？</summary>
+      <div class="a">1MB 芯片放不下固件 + 文件系统，因此本固件<b>不含文件系统分区</b>：亮度、频谱样式、显示旋转等设置重启后<b>不会保存</b>（每次开机为默认值），WiFi 配网与所有显示功能不受影响。4MB Flash 的板子可用仓库里的 nodemcuv2 完整版构建。</div>
     </details>
     <details>
-      <summary>鐑у綍鎴愬姛鍚庤澶囬粦灞?/ 鑺卞睆 / 棰滆壊涓嶅</summary>
-      <div class="a">鏈浐浠堕€傞厤 <b>GC9107 128脳128</b> 灞忋€傚鏋滄槸鍏朵粬灞忓箷锛堝 240脳240 ST7789 鐨?SD2锛夛紝璇峰嬁浣跨敤鏈〉鍥轰欢 鈥斺€?鍘?a href="https://mac.qust.me" target="_blank" rel="noopener">鍘熶綔鑰呭畼缃?/a>銆傞鑹蹭笉瀵瑰彲鍦ㄥ浐浠堕厤缃噷鍒囨崲鏃嬭浆涓庤儗鍏夋瀬鎬с€?/div>
+      <summary>烧录成功后设备黑屏 / 花屏 / 颜色不对</summary>
+      <div class="a">本固件适配 <b>GC9107 128×128</b> 屏。如果是其他屏幕（如 240×240 ST7789 的 SD2），请勿使用本页固件 —— 去<a href="https://mac.qust.me" target="_blank" rel="noopener">原作者官网</a>。颜色不对可在固件配置里切换旋转与背光极性。</div>
     </details>
     <details>
-      <summary>鐑у畬鍚庡紑鏈鸿鍋氫粈涔堬紵</summary>
-      <div class="a">棣栨寮€鏈轰細寤虹儹鐐?<b>AI-Clock-Setup</b>锛氭墜鏈鸿繛涓婅嚜鍔ㄥ脊閰嶇綉椤碉紙鎴栨祻瑙堝櫒鎵撳紑 192.168.4.1锛夛紝閫夊閲?WiFi 杈撳瘑鐮併€備箣鍚庤 Windows 妗ユ帴绋嬪簭锛堜粨搴?windows-app/ 鑷缂栬瘧锛屾垨瑙?GitHub Releases锛夛紝鍚屽眬鍩熺綉鑷姩閰嶅銆?/div>
+      <summary>烧完后开机要做什么？</summary>
+      <div class="a">首次开机会建热点 <b>AI-Clock-Setup</b>：手机连上自动弹配网页（或浏览器打开 192.168.4.1），选家里 WiFi 输密码。之后装 Windows 桥接程序（仓库 windows-app/ 自行编译，或见 GitHub Releases），同局域网自动配对。</div>
     </details>
   </div>
 </section>
 
 <section id="credits">
   <div class="wrap">
-    <h2>鑷磋阿<span class="en">Credits</span></h2>
+    <h2>致谢<span class="en">Credits</span></h2>
     <div class="credit">
-      <p>鏈」鐩?fork 鑷?<b><a href="https://github.com/pengchujin" target="_blank" rel="noopener">@pengchujin</a></b> 鐨勫紑婧愰」鐩?<a href="https://github.com/pengchujin/esp8266-ai" target="_blank" rel="noopener">pengchujin/esp8266-ai</a>锛氬浐浠舵灦鏋勩€丮ac / Windows 妗ユ帴绋嬪簭銆侀厤缃戞柟妗堝潎鍑鸿嚜鍘熶綔鑰呬箣鎵嬶紝<b>琛峰績鎰熻阿鍘熶綔鑰呯殑寮€婧愯础鐚?/b>锛?/p>
-      <p>鍘熼」鐩畼缃?<a href="https://mac.qust.me" target="_blank" rel="noopener">mac.qust.me</a>锛?40脳240 SD2 纭欢鐨勭綉椤靛埛鏈恒€丗AQ 涓庢垚鍝佽喘涔帮級銆?/p>
-      <p>寮€婧愪緷璧栵細<a href="https://github.com/bodmer/TFT_eSPI" target="_blank" rel="noopener">TFT_eSPI</a> 路 <a href="https://github.com/tzapu/WiFiManager" target="_blank" rel="noopener">WiFiManager</a> 路 <a href="https://github.com/bblanchon/ArduinoJson" target="_blank" rel="noopener">ArduinoJson</a> 路 <a href="https://github.com/bitbank2/AnimatedGIF" target="_blank" rel="noopener">AnimatedGIF</a> 路 <a href="https://github.com/naudio/NAudio" target="_blank" rel="noopener">NAudio</a> 路 <a href="https://github.com/esphome/esp-web-tools" target="_blank" rel="noopener">ESP Web Tools</a></p>
+      <p>本项目 fork 自 <b><a href="https://github.com/pengchujin" target="_blank" rel="noopener">@pengchujin</a></b> 的开源项目 <a href="https://github.com/pengchujin/esp8266-ai" target="_blank" rel="noopener">pengchujin/esp8266-ai</a>：固件架构、Mac / Windows 桥接程序、配网方案均出自原作者之手，<b>衷心感谢原作者的开源贡献</b>！</p>
+      <p>原项目官网 <a href="https://mac.qust.me" target="_blank" rel="noopener">mac.qust.me</a>（240×240 SD2 硬件的网页刷机、FAQ 与成品购买）。</p>
+      <p>开源依赖：<a href="https://github.com/bodmer/TFT_eSPI" target="_blank" rel="noopener">TFT_eSPI</a> · <a href="https://github.com/tzapu/WiFiManager" target="_blank" rel="noopener">WiFiManager</a> · <a href="https://github.com/bblanchon/ArduinoJson" target="_blank" rel="noopener">ArduinoJson</a> · <a href="https://github.com/bitbank2/AnimatedGIF" target="_blank" rel="noopener">AnimatedGIF</a> · <a href="https://github.com/naudio/NAudio" target="_blank" rel="noopener">NAudio</a> · <a href="https://github.com/esphome/esp-web-tools" target="_blank" rel="noopener">ESP Web Tools</a></p>
     </div>
   </div>
 </section>
 
 <footer>
-  <div class="wrap">AI 灏忓睆骞?GC9107 鐗?路 fork of pengchujin/esp8266-ai 路 纭欢銆佸浐浠躲€佽蒋浠跺叏閮ㄥ紑婧?/div>
+  <div class="wrap">AI 小屏幕 GC9107 版 · fork of pengchujin/esp8266-ai · 硬件、固件、软件全部开源</div>
 </footer>
 
 </body>
