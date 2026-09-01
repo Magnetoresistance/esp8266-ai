@@ -48,6 +48,7 @@
   .card h3{font-size:16px;margin-bottom:6px}
   .card p{font-size:14px;color:var(--dim)}
   .card .new{color:var(--accent);font-size:12px;border:1px solid rgba(126,231,135,.35);border-radius:6px;padding:0 6px;margin-left:6px}
+  .card .na{color:var(--red);font-size:12px;border:1px solid rgba(255,123,114,.4);border-radius:6px;padding:0 6px;margin-left:6px}
   .flash-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px}
   .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:22px 0}
   .step{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:16px;font-size:14px;color:var(--dim)}
@@ -96,13 +97,13 @@
   <div class="wrap">
     <span class="badge">基于 pengchujin/esp8266-ai 二次开发 · 感谢原作者开源</span>
     <h1>桌上的一台 <span class="ai">AI 状态小电脑</span></h1>
-    <p class="sub">一块 128×128 的复古小电视（GC9107），实时显示 Claude Code / Codex CLI 的工作状态与额度，还能屏幕镜像、放相册、跳音乐频谱。无需任何 API key。</p>
+    <p class="sub">一块 128×128 的复古小电视（GC9107），硬件新增棱镜显示特性，实时显示 Claude Code / Codex CLI 的工作状态与额度，还能屏幕镜像、放相册、跳音乐频谱。无需任何 API key。</p>
     <div class="cta">
       <a class="btn btn-primary" href="#flash">▶ 烧录固件</a>
       <a class="btn btn-ghost" href="https://github.com/Magnetoresistance/esp8266-ai" target="_blank" rel="noopener">◆ 在 GitHub 查看</a>
     </div>
     <div class="tags">
-      <span>无需 API key</span><span>网页一键刷机</span><span>128×128 GC9107</span><span>1MB Flash 适配</span><span>硬件 + 软件全开源</span>
+      <span>无需 API key</span><span>网页一键刷机</span><span>128×128 GC9107</span><span>1MB Flash 适配</span><span>软件全开源 · 硬件暂未开源</span><span>棱镜显示</span>
     </div>
   </div>
 </header>
@@ -115,10 +116,10 @@
       <div class="card"><h3>AI 工作状态与额度</h3><p>桌宠动起来 = AI 正在干活。方形进度环 + 大字显示 5 小时 / 周额度真实用量，等你审批时边框红闪。</p></div>
       <div class="card"><h3>网速实时监视</h3><p>任务管理器风格的上下行曲线，滚动窗口自动调整量程。</p></div>
       <div class="card"><h3>音乐播放显示</h3><p>专辑封面、歌名、歌手、进度条实时同步，自动切入切回。</p></div>
-      <div class="card"><h3>可换桌宠</h3><p>内置 petdex.dev 画廊 3300+ 开源桌宠，也可上传任意 GIF，板上直接解码。</p></div>
+      <div class="card"><h3>可换桌宠<span class="na">暂不可用</span></h3><p>内置 petdex.dev 画廊 3300+ 开源桌宠，也可上传任意 GIF，板上直接解码。该功能在当前版本暂不可用，待后续更新恢复。</p></div>
       <div class="card"><h3>屏幕镜像<span class="new">新增</span></h3><p>PC 全屏 / 指定窗口 / 框选区域，实时镜像到小屏（Windows 桥接）。</p></div>
-      <div class="card"><h3>照片相册<span class="new">新增</span></h3><p>本地目录幻灯片轮播，间隔 / 顺序 / 随机切换随手控制。</p></div>
-      <div class="card"><h3>音乐频谱<span class="new">新增</span></h3><p>WASAPI 抓取系统音频做 24 段频谱，柱状 / 波形 / 环形十余种效果，不录制不存储音频。</p></div>
+      <div class="card"><h3>照片相册<span class="new">新增</span></h3><p>（Windows 桥接）本地目录幻灯片轮播，间隔 / 顺序 / 随机切换随手控制。</p></div>
+      <div class="card"><h3>音乐频谱<span class="new">新增</span></h3><p>（Windows 桥接）WASAPI 抓取系统音频做 24 段频谱，柱状 / 波形 / 环形十余种效果，不录制不存储音频。</p></div>
       <div class="card"><h3>股票行情</h3><p>腾讯行情接口，涨红跌绿，中文名位图清晰显示。</p></div>
     </div>
   </div>
@@ -188,6 +189,10 @@
       <div class="a">本固件适配 <b>GC9107 128×128</b> 屏。如果是其他屏幕（如 240×240 ST7789 的 SD2），请勿使用本页固件 —— 去<a href="https://mac.qust.me" target="_blank" rel="noopener">原作者官网</a>。颜色不对可在固件配置里切换旋转与背光极性。</div>
     </details>
     <details>
+      <summary>macOS 桥接程序支持新功能吗？</summary>
+      <div class="a">目前<b>仅 Windows 桥接程序为最新版本（v0.5.1，与固件同版本）</b>；macOS 桥接端程序暂未同步更新，屏幕镜像 / 照片相册 / 音乐频谱等新增功能在 Mac 上暂不可用。</div>
+    </details>
+    <details>
       <summary>烧完后开机要做什么？</summary>
       <div class="a">首次开机会建热点 <b>AI-Clock-Setup</b>：手机连上自动弹配网页（或浏览器打开 192.168.4.1），选家里 WiFi 输密码。之后装 Windows 桥接程序（仓库 windows-app/ 自行编译，或见 GitHub Releases），同局域网自动配对。</div>
     </details>
@@ -199,6 +204,7 @@
     <h2>致谢<span class="en">Credits</span></h2>
     <div class="credit">
       <p>本项目 fork 自 <b><a href="https://github.com/pengchujin" target="_blank" rel="noopener">@pengchujin</a></b> 的开源项目 <a href="https://github.com/pengchujin/esp8266-ai" target="_blank" rel="noopener">pengchujin/esp8266-ai</a>：固件架构、Mac / Windows 桥接程序、配网方案均出自原作者之手，<b>衷心感谢原作者的开源贡献</b>！</p>
+      <p>说明：本项目目前<b>仅软件开源</b>（固件 + Windows 桥接程序，v0.5.1 同版本）；<b>硬件方案（含棱镜显示设计）暂未开源</b>；macOS 桥接程序暂未同步更新。</p>
       <p>原项目官网 <a href="https://mac.qust.me" target="_blank" rel="noopener">mac.qust.me</a>（240×240 SD2 硬件的网页刷机、FAQ 与成品购买）。</p>
       <p>开源依赖：<a href="https://github.com/bodmer/TFT_eSPI" target="_blank" rel="noopener">TFT_eSPI</a> · <a href="https://github.com/tzapu/WiFiManager" target="_blank" rel="noopener">WiFiManager</a> · <a href="https://github.com/bblanchon/ArduinoJson" target="_blank" rel="noopener">ArduinoJson</a> · <a href="https://github.com/bitbank2/AnimatedGIF" target="_blank" rel="noopener">AnimatedGIF</a> · <a href="https://github.com/naudio/NAudio" target="_blank" rel="noopener">NAudio</a> · <a href="https://github.com/esphome/esp-web-tools" target="_blank" rel="noopener">ESP Web Tools</a></p>
     </div>
@@ -206,7 +212,7 @@
 </section>
 
 <footer>
-  <div class="wrap">AI 小屏幕 GC9107 版 · fork of pengchujin/esp8266-ai · 硬件、固件、软件全部开源</div>
+  <div class="wrap">AI 小屏幕 GC9107 版 · fork of pengchujin/esp8266-ai · 软件全部开源 · 硬件暂未开源</div>
 </footer>
 
 </body>
